@@ -206,6 +206,7 @@ describe("quota cache", () => {
       const renameSpy = vi.spyOn(fs, "rename");
       let attempts = 0;
       renameSpy.mockImplementation(async (...args) => {
+        if (String(args[1]).endsWith(".write-lock")) return realRename(...args);
         attempts += 1;
         if (attempts < 3) {
           const error = new Error(
@@ -282,6 +283,7 @@ describe("quota cache", () => {
         [5, "EPERM"],
       ]);
       renameSpy.mockImplementation(async (...args) => {
+        if (String(args[1]).endsWith(".write-lock")) return realRename(...args);
         attempts += 1;
         const code = retryableAttempts.get(attempts);
         if (code) {
@@ -315,9 +317,11 @@ describe("quota cache", () => {
 
   it("cleans up temp files when rename keeps failing", async () => {
     const { saveQuotaCache } = await import("../lib/quota-cache.js");
+    const realRename = fs.rename.bind(fs);
     const renameSpy = vi.spyOn(fs, "rename");
     const unlinkSpy = vi.spyOn(fs, "unlink");
-    renameSpy.mockImplementation(async () => {
+    renameSpy.mockImplementation(async (...args) => {
+      if (String(args[1]).endsWith(".write-lock")) return realRename(...args);
       const error = new Error("locked") as NodeJS.ErrnoException;
       error.code = "EPERM";
       throw error;
@@ -337,7 +341,7 @@ describe("quota cache", () => {
         byEmail: {},
       });
 
-      expect(unlinkSpy).toHaveBeenCalledTimes(1);
+      expect(unlinkSpy.mock.calls.filter(([path]) => String(path).endsWith(".tmp"))).toHaveLength(1);
       const entries = await fs.readdir(tempDir);
       expect(entries.some((entry) => entry.endsWith(".tmp"))).toBe(false);
     } finally {
@@ -547,6 +551,7 @@ describe("quota cache", () => {
     let attempts = 0;
     const renameSpy = vi.spyOn(fs, "rename");
     renameSpy.mockImplementation(async (...args) => {
+      if (String(args[1]).endsWith(".write-lock")) return realRename(...args);
       attempts += 1;
       if (attempts === 1) {
         const error = new Error("dir not empty") as NodeJS.ErrnoException;
@@ -607,4 +612,51 @@ describe("quota cache", () => {
     const loaded = await loadQuotaCache();
     expect(loaded.byAccountId.acc_1?.primary.usedPercent).toBe(99);
   });
+  it("merges overlapping CLI and automatic cache changes from independent writers", async () => {
+    const first = await import("../lib/quota-cache.js");
+    vi.resetModules();
+    const second = await import("../lib/quota-cache.js");
+    const entry = (updatedAt: number) => ({updatedAt,status:200,model:"fixture",primary:{usedPercent:updatedAt},secondary:{}});
+    await first.saveQuotaCache({byAccountId:{binding:entry(1)},byEmail:{}});
+    const leftBase = await first.loadQuotaCache(), rightBase = await second.loadQuotaCache();
+    const left = structuredClone(leftBase), right = structuredClone(rightBase);
+    left.byWorkspace = {personal:entry(2)};
+    right.byAccountId.binding = entry(3);
+    right.byWorkspace = {other:entry(3)};
+    await Promise.all([first.saveQuotaCache(left, leftBase), second.saveQuotaCache(right, rightBase)]);
+    const saved = await first.loadQuotaCache();
+    expect(saved.byWorkspace).toEqual({personal:entry(2),other:entry(3)});
+    expect(saved.byAccountId.binding).toEqual(entry(3));
+    // A repeat save from the stale CLI must not resurrect old observations.
+    await first.saveQuotaCache(left, leftBase);
+    expect((await first.loadQuotaCache()).byAccountId.binding).toEqual(entry(3));
+  });
+
+  it("does not apply stale cache deletion over a concurrent observation", async () => {
+    const {loadQuotaCache,saveQuotaCache} = await import("../lib/quota-cache.js");
+    const entry = (updatedAt: number) => ({updatedAt,status:200,model:"fixture",primary:{},secondary:{}});
+    await saveQuotaCache({byAccountId:{},byEmail:{fixture:entry(1)}});
+    const baseline = await loadQuotaCache();
+    const proposal = structuredClone(baseline); delete proposal.byEmail.fixture;
+    await saveQuotaCache({byAccountId:{},byEmail:{fixture:entry(2)}});
+    await saveQuotaCache(proposal, baseline);
+    expect((await loadQuotaCache()).byEmail.fixture).toEqual(entry(2));
+  });
+
+  it("leaves the latest cache intact if the locked merge read fails", async () => {
+    const {loadQuotaCache,saveQuotaCache,getQuotaCachePath} = await import("../lib/quota-cache.js");
+    const entry = {updatedAt:1,status:200,model:"fixture",primary:{},secondary:{}};
+    await saveQuotaCache({byAccountId:{},byEmail:{},byWorkspace:{personal:entry}});
+    const original = await fs.readFile(getQuotaCachePath(), "utf8");
+    const realRead = fs.readFile.bind(fs);
+    const read = vi.spyOn(fs,"readFile").mockImplementation(async (...args) => {
+      if (String(args[0])===getQuotaCachePath()) throw Object.assign(new Error("fixture read failure"),{code:"EIO"});
+      return realRead(...args);
+    });
+    try { await saveQuotaCache({byAccountId:{other:entry},byEmail:{}}); }
+    finally { read.mockRestore(); }
+    expect(await fs.readFile(getQuotaCachePath(), "utf8")).toBe(original);
+    expect((await loadQuotaCache()).byWorkspace?.personal).toEqual(entry);
+  });
+
 });

@@ -1,13 +1,10 @@
 import { getStoragePathState, runWithStoragePathState } from "../storage/path-state.js";
-import { join } from "node:path";
 import { AccountManager, resolveAccountRecordId } from "../accounts.js";
 import { getAccountPolicyKey, loadAccountPolicyStore } from "../account-policy.js";
 import { getStoragePath, type AccountMetadataV3 } from "../storage.js";
 import { fetchCodexQuotaSnapshot, type CodexQuotaSnapshot } from "../quota-probe.js";
 import { loadQuotaCache, saveQuotaCache } from "../quota-cache.js";
 import { updateQuotaCacheForWorkspace } from "../codex-manager/quota-cache-helpers.js";
-import { getCodexMultiAuthDir } from "../runtime-paths.js";
-import { withFileTransactionLock } from "../storage/file-lock.js";
 import { createNativeAccountStorageReader } from "./native-account-storage.js";
 import { ensureFreshAccessToken } from "./rotation-token-refresh.js";
 import { automaticCheckWorkspaceId, runAutomaticAccountChecks } from "./automatic-account-checks.js";
@@ -17,12 +14,12 @@ type Observer = (account: AccountMetadataV3, snapshot: CodexQuotaSnapshot, accou
 export function createAutomaticSubscriptionCheck(observe?: Observer) {
     const path = getStoragePath(), storageState = getStoragePathState();
     const read = createNativeAccountStorageReader(undefined, path);
-    const quotaPath = join(getCodexMultiAuthDir(), "quota-cache.json");
-    const onQuota: Observer = observe ?? (async (account, snapshot, accounts, workspaceId) => withFileTransactionLock(quotaPath, async () => {
+    const onQuota: Observer = observe ?? (async (account, snapshot, accounts, workspaceId) => {
         const cache = await loadQuotaCache();
+        const baseline = structuredClone(cache);
         updateQuotaCacheForWorkspace(cache, account, workspaceId, snapshot, accounts);
-        await saveQuotaCache(cache);
-    }));
+        await saveQuotaCache(cache, baseline);
+    });
     return (signal: AbortSignal) => runWithStoragePathState(storageState, () => runAutomaticAccountChecks({
         path: `${path}.automatic-checks.json`, signal, loadPolicies: loadAccountPolicyStore,
         loadAccounts: async () => { const snapshot = await read(); return snapshot.verified ? snapshot.storage : null; },

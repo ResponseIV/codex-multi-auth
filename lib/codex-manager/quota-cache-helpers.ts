@@ -134,6 +134,11 @@ export function updateQuotaCacheForWorkspace(cache: QuotaCacheData, account: Acc
     if (workspaceId === normalizeQuotaAccountId(account.accountId)) {
         updateQuotaCacheForAccount(cache, account, snapshot, accounts);
     } else {
+        // Retire the ambiguous fallback only after retaining its binding observation.
+        const boundId = normalizeQuotaAccountId(account.accountId);
+        const binding = boundId ? findQuotaCacheEntryForAccount(cache, account, accounts, undefined, boundId) : null;
+        const boundKey = boundId && quotaWorkspaceKey(account, boundId);
+        if (binding && boundKey) cache.byWorkspace[boundKey] = binding;
         const email = normalizeQuotaEmail(account.email);
         if (email) delete cache.byEmail[email];
     }

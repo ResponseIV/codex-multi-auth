@@ -356,7 +356,10 @@ not replaced by another workspace. Selection and credentials are revalidated aft
 refresh, without changing the saved selection or desktop login.
 Quota observations are cached per saved credential and workspace. Status reads the
 selected workspace; routing reads the exact request workspace, so Personal quota
-never stands in for organization quota. Workspace switches and recovered token
+never stands in for organization quota. Existing organization observations survive
+Personal checks and switching back. All quota-cache writers merge their changes
+under a shared file lock to preserve observations from concurrent checks.
+Workspace switches and recovered token
 rotations preserve the existing per-workspace attempt limit.
 
 It completes the tiny response only for a personal subscription

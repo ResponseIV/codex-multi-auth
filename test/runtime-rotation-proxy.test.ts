@@ -5523,13 +5523,13 @@ it("stops a stored pin after refresh disables its only workspace",async()=>{
 });
 
 it("routes with scoped Personal quota while keeping exhausted shared organization bindings separate", async () => {
- const { updateQuotaCacheForWorkspace } = await import("../lib/codex-manager/quota-cache-helpers.js");
+ const { updateQuotaCacheForWorkspace, updateQuotaCacheForAccount } = await import("../lib/codex-manager/quota-cache-helpers.js");
  const now = Date.now();
  const storage = createStorage(now);
  storage.accounts.forEach((account, i) => { account.recordId=`fixture-${i}`; account.accountId="shared-org"; account.currentWorkspaceIndex=1; account.workspaces=[{id:"shared-org",enabled:true},{id:`personal-${i}`,enabled:true}]; });
  const cache = {byAccountId:{},byEmail:{}};
  for (const [i,account] of storage.accounts.entries()) {
-  updateQuotaCacheForWorkspace(cache,account,"shared-org",{status:200,model:"common",primary:{usedPercent:100,resetAtMs:now+3600000},secondary:{}},storage.accounts);
+  updateQuotaCacheForAccount(cache,account,{status:200,model:"common",primary:{usedPercent:100,resetAtMs:now+3600000},secondary:{}},storage.accounts);
   updateQuotaCacheForWorkspace(cache,account,`personal-${i}`,{status:200,model:"common",planType:"pro",primary:{usedPercent:i===0?100:30,resetAtMs:now+3600000},secondary:{}},storage.accounts);
  }
  const manager=new AccountManager(undefined,storage);

@@ -1677,7 +1677,7 @@ export async function runFix(
 	let quotaCacheSaveError: string | null = null;
 	if (!options.dryRun && workingQuotaCache && quotaCacheChanged) {
 		try {
-			await saveQuotaCache(workingQuotaCache);
+			await saveQuotaCache(workingQuotaCache, quotaCache ?? undefined);
 		} catch (error) {
 			// Account storage was already persisted above. Surface the quota-cache
 			// save failure as a partial-success warning rather than turning the

@@ -133,3 +133,16 @@ it("never exposes selected Personal quota as organization quota to routing", asy
     expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts, undefined, "shared-org")).toBeNull();
     expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts, undefined, "personal-1")).toBeNull();
 });
+
+it("preserves exhausted organization quota when a Personal check is followed by switching back", async () => {
+    const storage = await selectedPersonalFixture();
+    const exhausted = { updatedAt: Date.now(), status: 200, model: "fixture", primary: { usedPercent: 100, resetAtMs: Date.now()+3600000 }, secondary: {} };
+    const cache: QuotaCacheData = { byAccountId: {}, byEmail: Object.fromEntries(storage.accounts.map(account => [account.email, exhausted])) };
+    loadQuota.mockResolvedValue(cache);
+    await createAutomaticSubscriptionCheck()(new AbortController().signal);
+    for (const account of storage.accounts) {
+        expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts)?.primary.usedPercent).toBe(0);
+        account.currentWorkspaceIndex = 0;
+        expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts)?.primary.usedPercent).toBe(100);
+    }
+});
