@@ -122,6 +122,8 @@ API/ZDR credentials or reset credits. A private attempt file stores hashed accou
 record-and-workspace keys and timestamps under a cross-process lock. It contains
 no prompts or tokens. The saved workspace selection is revalidated after token
 refresh; a disabled or changed selection is not replaced by another workspace.
-Selected workspace quota is never cached as the stored organization binding.
+Selected workspace quota is keyed by credential record and workspace; it is never
+read as the stored organization binding. Recovery journals preserve the record
+identity across token rotation so they cannot reset the automatic-check throttle.
 Manual checks still require `--prime`; enabling an account policy does not change
 that command's default.

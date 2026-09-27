@@ -1,6 +1,7 @@
 import { mergeAccountCooldown, mergeAccountSnapshot, mergeAccountRuntimeObservations } from "./storage/snapshot-merge.js";
 import type { Auth } from "@codex-ai/sdk";
-import { createHash } from "node:crypto";
+import { deriveAccountRecordId, resolveAccountRecordId } from "./storage/record-identity.js";
+export { resolveAccountRecordId } from "./storage/record-identity.js";
 import { existsSync } from "node:fs";
 import { saveAccountsWithRetry } from "./storage/save-retry.js";
 import { createLogger } from "./logger.js";
@@ -113,36 +114,6 @@ function getAccountCircuitKey(account: ManagedAccount): string {
 			getAccountIdentityKey(account) ?? `circuit:${nextRuntimeCircuitKeyId++}`;
 	}
 	return account.circuitKeyId;
-}
-
-function deriveAccountRecordId(
-	account: {
-		accountId?: string;
-		email?: string;
-		refreshToken: string;
-		addedAt: number;
-	},
-): string {
-	const seed = [
-		account.addedAt,
-		account.accountId?.trim() ?? "",
-		account.email?.trim().toLowerCase() ?? "",
-		account.refreshToken.trim(),
-	].join("\u0000");
-	return `record:${createHash("sha256").update(seed).digest("hex")}`;
-}
-
-export function resolveAccountRecordId(
-	account: {
-		recordId?: string;
-		accountId?: string;
-		email?: string;
-		refreshToken: string;
-		addedAt: number;
-	},
-): string {
-	const stored = account.recordId?.trim();
-	return stored || deriveAccountRecordId(account);
 }
 
 export function getRuntimeTrackerKey(account: ManagedAccount): string | number {
@@ -1948,6 +1919,7 @@ export class AccountManager {
 					await runWithStoragePathState(this.storagePathState, () =>
 						recordPendingAuth(getStoragePath(), {
 							priorRefreshToken,
+							recordId: live.recordId,
 							refreshToken: auth.refresh,
 							accessToken: auth.access,
 							expiresAt: auth.expires,

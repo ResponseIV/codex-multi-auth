@@ -354,6 +354,10 @@ workspace selection (choose Personal for a Personal subscription); accounts with
 workspace metadata use their stored binding. A disabled selection is skipped,
 not replaced by another workspace. Selection and credentials are revalidated after
 refresh, without changing the saved selection or desktop login.
+Quota observations are cached per saved credential and workspace. Status reads the
+selected workspace; routing reads the exact request workspace, so Personal quota
+never stands in for organization quota. Workspace switches and recovered token
+rotations preserve the existing per-workspace attempt limit.
 
 It completes the tiny response only for a personal subscription
 with zero usage and no established reset countdown. This consumes subscription

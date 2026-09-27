@@ -24,12 +24,16 @@ export interface QuotaCacheEntry {
 export interface QuotaCacheData {
 	byAccountId: Record<string, QuotaCacheEntry>;
 	byEmail: Record<string, QuotaCacheEntry>;
+	/** Quota scoped to a saved credential record and exact workspace. */
+	byWorkspace?: Record<string, QuotaCacheEntry>;
 }
 
 interface QuotaCacheFile {
 	version: 1;
 	byAccountId: Record<string, QuotaCacheEntry>;
 	byEmail: Record<string, QuotaCacheEntry>;
+	/** Quota scoped to a saved credential record and exact workspace. */
+	byWorkspace?: Record<string, QuotaCacheEntry>;
 }
 
 const QUOTA_CACHE_PATH = join(getCodexMultiAuthDir(), "quota-cache.json");
@@ -177,6 +181,7 @@ export async function loadQuotaCache(): Promise<QuotaCacheData> {
 		return {
 			byAccountId: normalizeEntryMap(parsed.byAccountId),
 			byEmail: normalizeEntryMap(parsed.byEmail),
+			...(parsed.byWorkspace ? { byWorkspace: normalizeEntryMap(parsed.byWorkspace) } : {}),
 		};
 	} catch (error) {
 		logWarn(
@@ -212,6 +217,7 @@ export async function saveQuotaCache(data: QuotaCacheData): Promise<void> {
 		version: 1,
 		byAccountId: data.byAccountId,
 		byEmail: data.byEmail,
+		...(data.byWorkspace ? { byWorkspace: data.byWorkspace } : {}),
 	};
 
 	const writeTask = async (): Promise<void> => {

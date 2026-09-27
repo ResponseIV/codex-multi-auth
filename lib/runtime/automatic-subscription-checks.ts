@@ -5,7 +5,7 @@ import { getAccountPolicyKey, loadAccountPolicyStore } from "../account-policy.j
 import { getStoragePath, type AccountMetadataV3 } from "../storage.js";
 import { fetchCodexQuotaSnapshot, type CodexQuotaSnapshot } from "../quota-probe.js";
 import { loadQuotaCache, saveQuotaCache } from "../quota-cache.js";
-import { updateQuotaCacheForAccount } from "../codex-manager/quota-cache-helpers.js";
+import { updateQuotaCacheForWorkspace } from "../codex-manager/quota-cache-helpers.js";
 import { getCodexMultiAuthDir } from "../runtime-paths.js";
 import { withFileTransactionLock } from "../storage/file-lock.js";
 import { createNativeAccountStorageReader } from "./native-account-storage.js";
@@ -20,10 +20,7 @@ export function createAutomaticSubscriptionCheck(observe?: Observer) {
     const quotaPath = join(getCodexMultiAuthDir(), "quota-cache.json");
     const onQuota: Observer = observe ?? (async (account, snapshot, accounts, workspaceId) => withFileTransactionLock(quotaPath, async () => {
         const cache = await loadQuotaCache();
-        // A selected Personal workspace is not the stored organization binding.
-        // Never put its quota in the organization/email fallback cache.
-        const targets = accounts.map(row => ({ ...row, accountId: automaticCheckWorkspaceId(row), email: undefined }));
-        updateQuotaCacheForAccount(cache, { ...account, accountId: workspaceId, email: undefined }, snapshot, targets);
+        updateQuotaCacheForWorkspace(cache, account, workspaceId, snapshot, accounts);
         await saveQuotaCache(cache);
     }));
     return (signal: AbortSignal) => runWithStoragePathState(storageState, () => runAutomaticAccountChecks({

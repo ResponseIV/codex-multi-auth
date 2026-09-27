@@ -46,6 +46,7 @@ periodic first-use checks by the running CLI/app router (every 15 minutes).
 It completes a tiny response only for an unused personal subscription and
 consumes subscription quota. Checks follow the saved workspace selection and
 track each saved account separately, including members of a shared organization.
+Status and routing read quota for the exact workspace checked.
 Select Personal for a Personal subscription. The default is off; use `off` to disable it.
 Manual `check` still needs `--prime`. See the [command reference](docs/reference/commands.md).
 

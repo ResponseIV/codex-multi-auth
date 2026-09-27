@@ -641,3 +641,18 @@ it("keeps status readable when an injected policy loader fails",async()=>{
  await expect(runStatusCommand(deps)).resolves.toBe(0);
  expect(JSON.parse(vi.mocked(deps.logInfo!).mock.calls.at(-1)![0]).accounts[0].priority).toBe(1);
 });
+
+it("uses scoped Personal quota in status JSON and text instead of stale organization quota", async () => {
+ const { updateQuotaCacheForWorkspace } = await import("../lib/codex-manager/quota-cache-helpers.js");
+ const accounts = [{ recordId: "fixture-record", accountId: "org", email: "fixture@example.test", refreshToken: "fixture", addedAt: 1, lastUsed: 1, workspaces: [{ id: "personal", enabled: true }] }];
+ const old = { updatedAt: 1000, status: 429, model: "fixture", primary: { usedPercent: 100, resetAtMs: 100000 }, secondary: {} };
+ const cache = { byAccountId: { org: old }, byEmail: { "fixture@example.test": old } };
+ updateQuotaCacheForWorkspace(cache, accounts[0]!, "personal", { status: 200, model: "fixture", primary: { usedPercent: 10, resetAtMs: 100000 }, secondary: {} }, accounts);
+ const logInfo=vi.fn();
+ const deps=createStatusDeps({logInfo,json:true,loadAccounts:async()=>({version:3,activeIndex:0,accounts}),loadQuotaCache:async()=>cache});
+ await runStatusCommand(deps);
+ const result=JSON.parse(logInfo.mock.calls[0]![0]);
+ expect(result.accounts[0].forecastRiskScore).toBe(0);
+ logInfo.mockClear();await runStatusCommand({...deps,json:false});
+ expect(logInfo.mock.calls.flat().join("\n")).not.toContain("quota-exhausted");
+});

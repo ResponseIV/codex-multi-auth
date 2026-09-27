@@ -1,5 +1,8 @@
 import {
 	buildQuotaEmailFallbackState,
+	findQuotaCacheEntryForAccount,
+	quotaWorkspaceKey,
+	type QuotaCacheAccountRef,
 	hasSafeQuotaEmailFallback,
 	hasUniqueQuotaAccountId,
 	normalizeQuotaAccountId,
@@ -29,43 +32,16 @@ import type { AccountMetadataV3 } from "../storage.js";
 /** Default model used for live quota probes across manager commands. */
 export const DEFAULT_LIVE_PROBE_MODEL = DEFAULT_PROBE_MODEL;
 
-function getQuotaCacheEntryForAccount(
-	cache: QuotaCacheData,
-	account: Pick<AccountMetadataV3, "accountId" | "email">,
-	accounts: readonly Pick<AccountMetadataV3, "accountId" | "email">[],
-	emailFallbackState = buildQuotaEmailFallbackState(accounts),
-): QuotaCacheEntry | null {
-	const accountId = normalizeQuotaAccountId(account.accountId);
-	if (
-		accountId &&
-		hasUniqueQuotaAccountId(accounts, account) &&
-		cache.byAccountId[accountId]
-	) {
-		return cache.byAccountId[accountId] ?? null;
-	}
-	const email = normalizeQuotaEmail(account.email);
-	if (
-		email &&
-		hasSafeQuotaEmailFallback(emailFallbackState, account) &&
-		cache.byEmail[email]
-	) {
-		return cache.byEmail[email] ?? null;
-	}
-	return null;
-}
-
+/** Combine selected-workspace observations with persisted account-level rate-limit blockers. */
 export function getPersistedQuotaViewForAccount(
 	cache: QuotaCacheData | null,
-	account: Pick<
-		AccountMetadataV3,
-		"accountId" | "email" | "rateLimitResetTimes"
-	>,
+	account: QuotaCacheAccountRef & Pick<AccountMetadataV3, "rateLimitResetTimes">,
 	accounts: readonly Pick<AccountMetadataV3, "accountId" | "email">[],
 	now: number,
 	emailFallbackState = buildQuotaEmailFallbackState(accounts),
 ): QuotaCacheEntry | null {
 	const cachedEntry = cache
-		? getQuotaCacheEntryForAccount(cache, account, accounts, emailFallbackState)
+		? findQuotaCacheEntryForAccount(cache, account, accounts, emailFallbackState)
 		: null;
 	const persistedResetAt = getRateLimitResetTimeForFamily(
 		account,
@@ -96,14 +72,9 @@ export function getPersistedQuotaViewForAccount(
 	};
 }
 
-export function updateQuotaCacheForAccount(
-	cache: QuotaCacheData,
-	account: Pick<AccountMetadataV3, "accountId" | "email">,
-	snapshot: CodexQuotaSnapshot,
-	accounts: readonly Pick<AccountMetadataV3, "accountId" | "email">[],
-	emailFallbackState = buildQuotaEmailFallbackState(accounts),
-): boolean {
-	const nextEntry: QuotaCacheEntry = {
+/** Retain only quota fields from a probe, never its credentials or response body. */
+function quotaEntryFromSnapshot(snapshot: CodexQuotaSnapshot): QuotaCacheEntry {
+	return {
 		updatedAt: Date.now(),
 		status: snapshot.status,
 		model: snapshot.model,
@@ -119,6 +90,17 @@ export function updateQuotaCacheForAccount(
 			resetAtMs: snapshot.secondary.resetAtMs,
 		},
 	};
+}
+
+/** Update legacy stored-binding quota with a unique ID or safe email fallback. */
+export function updateQuotaCacheForAccount(
+	cache: QuotaCacheData,
+	account: Pick<AccountMetadataV3, "accountId" | "email">,
+	snapshot: CodexQuotaSnapshot,
+	accounts: readonly Pick<AccountMetadataV3, "accountId" | "email">[],
+	emailFallbackState = buildQuotaEmailFallbackState(accounts),
+): boolean {
+	const nextEntry = quotaEntryFromSnapshot(snapshot);
 
 	let changed = false;
 	const accountId = normalizeQuotaAccountId(account.accountId);
@@ -143,12 +125,28 @@ export function updateQuotaCacheForAccount(
 	return changed;
 }
 
+/** Persist the observed workspace without attributing sibling quota to a stored binding. */
+export function updateQuotaCacheForWorkspace(cache: QuotaCacheData, account: AccountMetadataV3, workspaceId: string, snapshot: CodexQuotaSnapshot, accounts: readonly AccountMetadataV3[]): void {
+    const key = quotaWorkspaceKey(account, workspaceId);
+    if (!key) return;
+    cache.byWorkspace ??= {};
+    cache.byWorkspace[key] = quotaEntryFromSnapshot(snapshot);
+    if (workspaceId === normalizeQuotaAccountId(account.accountId)) {
+        updateQuotaCacheForAccount(cache, account, snapshot, accounts);
+    } else {
+        const email = normalizeQuotaEmail(account.email);
+        if (email) delete cache.byEmail[email];
+    }
+}
+
+/** Clone every cache namespace; immutable entries may safely remain shared. */
 export function cloneQuotaCacheData(cache: QuotaCacheData): QuotaCacheData {
 	// Shallow spreading is safe because quota cache entries are always replaced,
 	// never mutated in-place.
 	return {
 		byAccountId: { ...cache.byAccountId },
 		byEmail: { ...cache.byEmail },
+		...(cache.byWorkspace ? { byWorkspace: { ...cache.byWorkspace } } : {}),
 	};
 }
 

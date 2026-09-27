@@ -5,13 +5,15 @@ import { beforeEach, afterEach, it, expect, vi } from "vitest";
 import { saveAccounts, setStoragePathDirect } from "../lib/storage.js";
 import { getAccountPolicyKey, saveAccountPolicyStore, upsertAccountPolicy, type AccountPolicyStore } from "../lib/account-policy.js";
 import { createAutomaticSubscriptionCheck } from "../lib/runtime/automatic-subscription-checks.js";
+import { findQuotaCacheEntryForAccount, quotaWorkspaceKey } from "../lib/quota-readiness.js";
+import type { QuotaCacheData } from "../lib/quota-cache.js";
 import * as tokenRefresh from "../lib/runtime/rotation-token-refresh.js";
 import { removeWithRetry } from "./helpers/remove-with-retry.js";
-const { probe, saveQuota } = vi.hoisted(() => ({ probe: vi.fn(), saveQuota: vi.fn() }));
-vi.mock("../lib/quota-cache.js", () => ({ loadQuotaCache: async () => ({ byAccountId: {}, byEmail: {} }), saveQuotaCache: saveQuota }));
+const { probe, saveQuota, loadQuota } = vi.hoisted(() => ({ probe: vi.fn(), saveQuota: vi.fn(), loadQuota: vi.fn() }));
+vi.mock("../lib/quota-cache.js", () => ({ loadQuotaCache: loadQuota, saveQuotaCache: saveQuota }));
 vi.mock("../lib/quota-probe.js", () => ({ fetchCodexQuotaSnapshot: probe }));
 let dir: string;
-beforeEach(async () => { dir = await fs.mkdtemp(join(tmpdir(), "subscription-checks-")); vi.stubEnv("CODEX_MULTI_AUTH_DIR", dir); setStoragePathDirect(join(dir, "accounts.json")); saveQuota.mockReset(); probe.mockReset().mockResolvedValue({ status: 200, model: "fixture", primary: { usedPercent: 0 }, secondary: { usedPercent: 0 }, primingCompleted: true }); });
+beforeEach(async () => { dir = await fs.mkdtemp(join(tmpdir(), "subscription-checks-")); vi.stubEnv("CODEX_MULTI_AUTH_DIR", dir); setStoragePathDirect(join(dir, "accounts.json")); saveQuota.mockReset(); loadQuota.mockReset().mockImplementation(async () => ({ byAccountId: {}, byEmail: {} })); probe.mockReset().mockResolvedValue({ status: 200, model: "fixture", primary: { usedPercent: 0 }, secondary: { usedPercent: 0 }, primingCompleted: true }); });
 afterEach(async () => { vi.restoreAllMocks(); setStoragePathDirect(null); vi.unstubAllEnvs(); await removeWithRetry(dir, { recursive: true, force: true }); });
 it("automatically enables first-use completion only for the opted-in saved subscription binding", async () => {
     const account = { recordId: "fixture", accountId: "personal", refreshToken: "fixture-refresh", accessToken: "fixture-access", expiresAt: Date.now() + 3600000, addedAt: 1, lastUsed: 1, workspaces: [{ id: "personal", enabled: true }, { id: "other", enabled: true }] };
@@ -60,13 +62,14 @@ async function selectedPersonalFixture() {
     return storage;
 }
 it("primes both selected Personal workspaces when credentials share an organization binding", async () => {
-    await selectedPersonalFixture();
+    const storage = await selectedPersonalFixture();
     const before = await fs.readFile(join(dir, "accounts.json"), "utf8");
     await createAutomaticSubscriptionCheck()(new AbortController().signal);
     expect(probe.mock.calls.map(call => call[0].accountId)).toEqual(["personal-0", "personal-1"]);
     expect(probe.mock.calls.map(call => call[0].accessToken)).toEqual(["access-0", "access-1"]);
     expect(await fs.readFile(join(dir, "accounts.json"), "utf8")).toBe(before);
-    expect(saveQuota.mock.calls.map(call => Object.keys(call[0].byAccountId))).toEqual([["personal-0"], ["personal-1"]]);
+    expect(saveQuota.mock.calls.map(call => Object.keys(call[0].byWorkspace))).toEqual(storage.accounts.map((account, i) => [quotaWorkspaceKey(account, `personal-${i}`)]));
+    expect(saveQuota.mock.calls.every(call => Object.keys(call[0].byAccountId).length === 0)).toBe(true);
     expect(saveQuota.mock.calls.every(call => Object.keys(call[0].byEmail).length === 0)).toBe(true);
 });
 it("does not fall back to the organization when the selected Personal workspace is disabled", async () => {
@@ -103,4 +106,30 @@ it("uses the stored binding only when no workspace selection metadata exists", a
     await saveAccounts(storage);
     await createAutomaticSubscriptionCheck(vi.fn())(new AbortController().signal);
     expect(probe.mock.calls.map(call => call[0].accountId)).toEqual(["shared-org", "shared-org"]);
+});
+
+for (const selected of [true, false]) it(`round-trips automatic quota through status readers with selected workspace=${selected}`, async () => {
+    const storage = await selectedPersonalFixture();
+    if (!selected) {
+        storage.accounts.forEach(account => { account.workspaces = []; });
+        await saveAccounts(storage);
+    }
+    const stale = { updatedAt: 1, status: 429, model: "old", primary: { usedPercent: 100 }, secondary: {} };
+    const cache: QuotaCacheData = { byAccountId: { "shared-org": stale }, byEmail: Object.fromEntries(storage.accounts.map(account => [account.email, stale])) };
+    loadQuota.mockResolvedValue(cache);
+    probe.mockImplementation(async ({ accessToken }) => ({ status: 200, model: "fixture", primary: { usedPercent: accessToken === "access-0" ? 10 : 20 }, secondary: {} }));
+    await createAutomaticSubscriptionCheck()(new AbortController().signal);
+    expect(storage.accounts.map(account => findQuotaCacheEntryForAccount(cache, account, storage.accounts)?.primary.usedPercent)).toEqual([10, 20]);
+    if (selected) expect(cache.byEmail).toEqual({});
+});
+
+it("never exposes selected Personal quota as organization quota to routing", async () => {
+    const storage = await selectedPersonalFixture();
+    const cache: QuotaCacheData = { byAccountId: {}, byEmail: {} };
+    loadQuota.mockResolvedValue(cache);
+    await createAutomaticSubscriptionCheck()(new AbortController().signal);
+    const account = storage.accounts[0]!;
+    expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts, undefined, "personal-0")?.status).toBe(200);
+    expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts, undefined, "shared-org")).toBeNull();
+    expect(findQuotaCacheEntryForAccount(cache, account, storage.accounts, undefined, "personal-1")).toBeNull();
 });

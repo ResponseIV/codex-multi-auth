@@ -63,6 +63,19 @@ describe("quota cache", () => {
     expect(fileContent).toContain('"version": 1');
   });
 
+  it("persists scoped automatic observations through a real cache reload", async () => {
+    const { loadQuotaCache, saveQuotaCache } = await import("../lib/quota-cache.js");
+    const { updateQuotaCacheForWorkspace, cloneQuotaCacheData } = await import("../lib/codex-manager/quota-cache-helpers.js");
+    const { findQuotaCacheEntryForAccount } = await import("../lib/quota-readiness.js");
+    const account = { recordId: "fixture-record", accountId: "org", refreshToken: "fixture", addedAt: 1, lastUsed: 1, workspaces: [{ id: "personal", enabled: true }] };
+    const cache = await loadQuotaCache();
+    updateQuotaCacheForWorkspace(cache, account, "personal", { status: 200, model: "fixture", primary: { usedPercent: 23 }, secondary: {} }, [account]);
+    await saveQuotaCache(cloneQuotaCacheData(cache));
+    const loaded = await loadQuotaCache();
+    expect(findQuotaCacheEntryForAccount(loaded, account, [account])?.primary.usedPercent).toBe(23);
+    expect(findQuotaCacheEntryForAccount(loaded, account, [account], undefined, "org")).toBeNull();
+  });
+
   it("stages atomic writes through tempPathFor and leaves no .tmp behind", async () => {
     // End-to-end check of the staging contract this PR centralizes: the save
     // must write a sibling named by tempPathFor (<target>.<pid>.<ms>.<hex8>.tmp,

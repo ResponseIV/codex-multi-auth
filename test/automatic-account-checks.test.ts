@@ -210,3 +210,16 @@ it("does not inherit a shared legacy organization attempt for separate records",
     expect(journal[oldKey]).toBeUndefined();
     expect(Object.keys(journal)).toHaveLength(2);
 });
+
+it("retains a workspace throttle when selection switches away and back", async () => {
+    const f = fixture(); f.enable(0);
+    const account = f.storage.accounts[0]!;
+    account.workspaces = [{ id: "a", enabled: true }, { id: "b", enabled: true }];
+    account.currentWorkspaceIndex = 0;
+    await runAutomaticAccountChecks(f.options);
+    account.currentWorkspaceIndex = 1;
+    await runAutomaticAccountChecks(f.options);
+    account.currentWorkspaceIndex = 0;
+    await runAutomaticAccountChecks(f.options);
+    expect(f.check).toHaveBeenCalledTimes(2);
+});

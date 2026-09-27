@@ -35,11 +35,17 @@ export function automaticCheckWorkspaceId(account: AccountMetadataV3): string | 
 
 /** Policy keys can be shared by organization members; attempt limits must never be. */
 export function automaticAccountCheckKey(account: AccountMetadataV3): string {
+    return workspaceAttemptKey(account, automaticCheckWorkspaceId(account) ?? "");
+}
+
+/** Build the same key for inactive workspaces while pruning the attempt journal. */
+function workspaceAttemptKey(account: AccountMetadataV3, workspaceId: string): string {
     return `sha256:${createHash("sha256").update(JSON.stringify([
-        "automatic-check-v2", resolveAccountRecordId(account), automaticCheckWorkspaceId(account) ?? "",
+        "automatic-check-v2", resolveAccountRecordId(account), workspaceId,
     ])).digest("hex")}`;
 }
 
+/** Reject unreadable or oversized history rather than silently allowing duplicate probes. */
 async function readAttempts(path: string): Promise<Record<string, number>> {
     try {
         const raw = await withRetry(() => fs.readFile(path, "utf8"), retry);
@@ -53,6 +59,7 @@ async function readAttempts(path: string): Promise<Record<string, number>> {
         throw error;
     }
 }
+/** Atomically persist attempt timestamps before any billable network request. */
 async function saveAttempts(path: string, attempts: Record<string, number>): Promise<void> {
     const temp = tempPathFor(path);
     try {
@@ -74,7 +81,11 @@ export async function runAutomaticAccountChecks(options: AutomaticAccountCheckOp
         if (!storage || signal.aborted)
             return;
         const attempts = await readAttempts(options.path);
-        const keys = new Set(storage.accounts.map(automaticAccountCheckKey));
+        // Keep every still-saved workspace's throttle, including temporarily disabled selections.
+        const keys = new Set(storage.accounts.flatMap(account => [
+            automaticAccountCheckKey(account),
+            ...(account.workspaces ?? []).map(workspace => workspaceAttemptKey(account, workspace.id.trim())),
+        ]));
         for (const key of Object.keys(attempts))
             if (!keys.has(key))
                 delete attempts[key];
