@@ -10,18 +10,20 @@ import { getCodexMultiAuthDir } from "../runtime-paths.js";
 import { withFileTransactionLock } from "../storage/file-lock.js";
 import { createNativeAccountStorageReader } from "./native-account-storage.js";
 import { ensureFreshAccessToken } from "./rotation-token-refresh.js";
-import { workspaceModelScopes } from "./workspace-model-scopes.js";
-import { runAutomaticAccountChecks } from "./automatic-account-checks.js";
+import { automaticCheckWorkspaceId, runAutomaticAccountChecks } from "./automatic-account-checks.js";
 import { logWarn } from "../logger.js";
-type Observer = (account: AccountMetadataV3, snapshot: CodexQuotaSnapshot, accounts: AccountMetadataV3[]) => Promise<void> | void;
+type Observer = (account: AccountMetadataV3, snapshot: CodexQuotaSnapshot, accounts: AccountMetadataV3[], workspaceId: string) => Promise<void> | void;
 /** Captures this router's pool; reads only verified primary credentials, never API/ZDR entries. */
 export function createAutomaticSubscriptionCheck(observe?: Observer) {
     const path = getStoragePath(), storageState = getStoragePathState();
     const read = createNativeAccountStorageReader(undefined, path);
     const quotaPath = join(getCodexMultiAuthDir(), "quota-cache.json");
-    const onQuota: Observer = observe ?? (async (account, snapshot, accounts) => withFileTransactionLock(quotaPath, async () => {
+    const onQuota: Observer = observe ?? (async (account, snapshot, accounts, workspaceId) => withFileTransactionLock(quotaPath, async () => {
         const cache = await loadQuotaCache();
-        updateQuotaCacheForAccount(cache, account, snapshot, accounts);
+        // A selected Personal workspace is not the stored organization binding.
+        // Never put its quota in the organization/email fallback cache.
+        const targets = accounts.map(row => ({ ...row, accountId: automaticCheckWorkspaceId(row), email: undefined }));
+        updateQuotaCacheForAccount(cache, { ...account, accountId: workspaceId, email: undefined }, snapshot, targets);
         await saveQuotaCache(cache);
     }));
     return (signal: AbortSignal) => runWithStoragePathState(storageState, () => runAutomaticAccountChecks({
@@ -30,7 +32,9 @@ export function createAutomaticSubscriptionCheck(observe?: Observer) {
         check: async (storage, index) => {
             const manager = new AccountManager(undefined, storage);
             const account = manager.getAccountByIndex(index);
-            if (!account || !workspaceModelScopes(account).some(s => s.bound && s.routable) || signal.aborted)
+            const stored = storage.accounts[index];
+            const targetId = stored && automaticCheckWorkspaceId(stored);
+            if (!account || !targetId || signal.aborted)
                 return;
             const fresh = await ensureFreshAccessToken({ accountManager: manager, account, family: "codex", model: null, now: Date.now(), tokenRefreshSkewMs: 60000, tokenInvalidationCooldownMs: 300000 });
             try {
@@ -42,13 +46,12 @@ export function createAutomaticSubscriptionCheck(observe?: Observer) {
                 const policy = current ? (await loadAccountPolicyStore()).accounts[getAccountPolicyKey(current)] : undefined;
                 if (!disk.storage || !current || current.refreshToken !== fresh.account.refreshToken || current.accessToken !== fresh.accessToken || !policy?.autoPrime || policy.paused || policy.drained || current.enabled === false || current.authInvalidatedAt || (current.coolingDownUntil ?? 0) > Date.now())
                     return;
-                const bound = workspaceModelScopes(fresh.account).find(s => s.bound && s.routable);
-                if (!bound || (current.accountId && current.accountId !== bound.accountId) || current.workspaces?.some(w => w.id === bound.accountId && w.enabled === false) || signal.aborted)
+                if (automaticCheckWorkspaceId(current) !== targetId || signal.aborted)
                     return;
-                const snapshot = await fetchCodexQuotaSnapshot({ accountId: bound.accountId, accessToken: fresh.accessToken, primeUnusedSubscription: true, signal });
+                const snapshot = await fetchCodexQuotaSnapshot({ accountId: targetId, accessToken: fresh.accessToken, primeUnusedSubscription: true, signal });
                 if (snapshot.primingFailure)
                     logWarn("Automatic first-use completion was not confirmed; retry deferred until the next check.");
-                await onQuota(current, snapshot, disk.storage.accounts);
+                await onQuota(current, snapshot, disk.storage.accounts, targetId);
             }
             finally {
                 await manager.flushPendingSave();

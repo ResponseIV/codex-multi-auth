@@ -119,6 +119,9 @@ completion consumes subscription quota only when headers identify an unused
 personal subscription. The checker uses verified current subscription credentials,
 respects account/workspace disablement and pause/drain policy, and never uses
 API/ZDR credentials or reset credits. A private attempt file stores hashed account
-keys and timestamps under a cross-process lock. It contains no prompts or tokens.
+record-and-workspace keys and timestamps under a cross-process lock. It contains
+no prompts or tokens. The saved workspace selection is revalidated after token
+refresh; a disabled or changed selection is not replaced by another workspace.
+Selected workspace quota is never cached as the stored organization binding.
 Manual checks still require `--prime`; enabling an account policy does not change
 that command's default.

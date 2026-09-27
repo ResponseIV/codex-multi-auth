@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { z } from "zod";
+import { resolveAccountRecordId } from "../accounts.js";
+import { extractAccountId } from "../auth/token-utils.js";
 import { getAccountPolicyKey, type AccountPolicyStore } from "../account-policy.js";
-import type { AccountStorageV3 } from "../storage.js";
+import type { AccountMetadataV3, AccountStorageV3 } from "../storage.js";
 import { withFileTransactionLock } from "../storage/file-lock.js";
 import { withRetry } from "../fs-retry.js";
 import { tempPathFor } from "../temp-path.js";
@@ -21,6 +24,22 @@ export interface AutomaticAccountCheckOptions {
     now?: () => number;
     signal?: AbortSignal;
 }
+/** Honor the saved selection; a disabled/invalid selection must not fall back to a sibling. */
+export function automaticCheckWorkspaceId(account: AccountMetadataV3): string | undefined {
+    if (account.workspaces?.length) {
+        const selected = account.workspaces[account.currentWorkspaceIndex ?? 0];
+        return selected?.enabled === false ? undefined : selected?.id.trim() || undefined;
+    }
+    return account.accountId?.trim() || extractAccountId(account.accessToken) || undefined;
+}
+
+/** Policy keys can be shared by organization members; attempt limits must never be. */
+export function automaticAccountCheckKey(account: AccountMetadataV3): string {
+    return `sha256:${createHash("sha256").update(JSON.stringify([
+        "automatic-check-v2", resolveAccountRecordId(account), automaticCheckWorkspaceId(account) ?? "",
+    ])).digest("hex")}`;
+}
+
 async function readAttempts(path: string): Promise<Record<string, number>> {
     try {
         const raw = await withRetry(() => fs.readFile(path, "utf8"), retry);
@@ -55,7 +74,7 @@ export async function runAutomaticAccountChecks(options: AutomaticAccountCheckOp
         if (!storage || signal.aborted)
             return;
         const attempts = await readAttempts(options.path);
-        const keys = new Set(storage.accounts.map(a => getAccountPolicyKey(a)));
+        const keys = new Set(storage.accounts.map(automaticAccountCheckKey));
         for (const key of Object.keys(attempts))
             if (!keys.has(key))
                 delete attempts[key];
@@ -65,7 +84,7 @@ export async function runAutomaticAccountChecks(options: AutomaticAccountCheckOp
             const account = storage.accounts[index];
             if (!account)
                 continue;
-            const key = getAccountPolicyKey(account), policy = policies.accounts[key], now = options.now?.() ?? Date.now();
+            const key = automaticAccountCheckKey(account), policy = policies.accounts[getAccountPolicyKey(account)], now = options.now?.() ?? Date.now();
             if (!policy?.autoPrime || policy.paused || policy.drained || account.enabled === false || account.authInvalidatedAt || (account.coolingDownUntil ?? 0) > now)
                 continue;
             const lastAttempt = attempts[key];

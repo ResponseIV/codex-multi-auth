@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAccountPolicyKey, upsertAccountPolicy, type AccountPolicyStore } from "../lib/account-policy.js";
 import type { AccountStorageV3 } from "../lib/storage.js";
-import { runAutomaticAccountChecks, startAutomaticAccountChecks, AUTOMATIC_CHECK_INTERVAL_MS, AUTOMATIC_CHECK_INITIAL_DELAY_MS } from "../lib/runtime/automatic-account-checks.js";
+import { automaticAccountCheckKey, runAutomaticAccountChecks, startAutomaticAccountChecks, AUTOMATIC_CHECK_INTERVAL_MS, AUTOMATIC_CHECK_INITIAL_DELAY_MS } from "../lib/runtime/automatic-account-checks.js";
 import { removeWithRetry } from "./helpers/remove-with-retry.js";
 let dir: string;
 beforeEach(async () => { dir = await fs.mkdtemp(join(tmpdir(), "automatic-checks-")); });
@@ -162,8 +162,51 @@ describe("initial automatic check", () => {
 it("does not let a future-dated attempt suppress checks after a backwards clock step", async () => {
     const f = fixture();
     f.enable(0);
-    const key = getAccountPolicyKey(f.storage.accounts[0]!);
+    const key = automaticAccountCheckKey(f.storage.accounts[0]!);
     await fs.writeFile(f.options.path, JSON.stringify({ [key]: 1000 + 3600000 }));
     await runAutomaticAccountChecks(f.options);
     expect(f.check).toHaveBeenCalledTimes(1);
+});
+
+it("checks distinct records sharing an organization independently and keeps limits across reordering and rotation", async () => {
+    const f = fixture();
+    f.storage.accounts = [0, 1].map(i => ({ recordId: `record-${i}`, accountId: "shared-org", email: `fixture-${i}@example.test`, refreshToken: `refresh-${i}`, addedAt: 1, lastUsed: 1 }));
+    f.enable(0);
+    await runAutomaticAccountChecks(f.options);
+    expect(f.check.mock.calls.map(call => call[1])).toEqual([0, 1]);
+    const journal = JSON.parse(await fs.readFile(f.options.path, "utf8"));
+    expect(Object.keys(journal)).toHaveLength(2);
+    expect(JSON.stringify(journal)).not.toMatch(/shared-org|example|record-/);
+    f.storage.accounts.reverse();
+    f.storage.accounts[0]!.refreshToken = "rotated";
+    await runAutomaticAccountChecks({ ...f.options });
+    expect(f.check).toHaveBeenCalledTimes(2);
+    f.advance();
+    await runAutomaticAccountChecks(f.options);
+    expect(f.check).toHaveBeenCalledTimes(4);
+});
+
+it("checks a newly selected workspace without reusing the previous workspace's attempt", async () => {
+    const f = fixture();
+    const account = f.storage.accounts[0]!;
+    account.recordId = "stable";
+    account.workspaces = [{ id: "personal", enabled: true }, { id: "other", enabled: true }];
+    account.currentWorkspaceIndex = 0;
+    f.enable(0);
+    await runAutomaticAccountChecks(f.options);
+    account.currentWorkspaceIndex = 1;
+    await runAutomaticAccountChecks(f.options);
+    expect(f.check).toHaveBeenCalledTimes(2);
+});
+it("does not inherit a shared legacy organization attempt for separate records", async () => {
+    const f = fixture();
+    f.storage.accounts = [0, 1].map(i => ({ recordId: `record-${i}`, accountId: "shared-org", refreshToken: `refresh-${i}`, addedAt: 1, lastUsed: 1 }));
+    f.enable(0);
+    const oldKey = getAccountPolicyKey(f.storage.accounts[0]!);
+    await fs.writeFile(f.options.path, JSON.stringify({ [oldKey]: 1000 }));
+    await runAutomaticAccountChecks(f.options);
+    expect(f.check).toHaveBeenCalledTimes(2);
+    const journal = JSON.parse(await fs.readFile(f.options.path, "utf8"));
+    expect(journal[oldKey]).toBeUndefined();
+    expect(Object.keys(journal)).toHaveLength(2);
 });
