@@ -87,13 +87,41 @@ function normalizeLimit(key: string, value: unknown): BudgetLimit | null {
 	};
 }
 
+// Normalized keys can literally be Object.prototype member names —
+// "constructor" and "__proto__" both survive normalizeKey untouched. On a
+// plain object, reading an absent key resolves an inherited member
+// ({}.constructor === Object), which made a same-named limit look "already
+// present" to the merge and silently dropped the incoming entry; writing
+// "__proto__" invokes the setter and mutates the prototype instead of storing
+// anything. Null-prototype maps make every key a plain data slot regardless of
+// name (same convention as lib/storage/snapshot-merge.ts).
+function newLimitsMap(): Record<string, BudgetLimit> {
+	return Object.create(null) as Record<string, BudgetLimit>;
+}
+
+// Writes into maps that callers may have built as plain object literals cannot
+// rely on the map being null-prototype, so "__proto__" needs an own-property
+// write that bypasses the inherited setter.
+function writeLimitEntry(
+	map: Record<string, BudgetLimit>,
+	key: string,
+	limit: BudgetLimit,
+): void {
+	Object.defineProperty(map, key, {
+		value: limit,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	});
+}
+
 function emptyStore(): BudgetGuardStore {
-	return { version: 1, limits: {} };
+	return { version: 1, limits: newLimitsMap() };
 }
 
 function normalizeStore(value: unknown): BudgetGuardStore {
 	if (!isRecord(value) || value.version !== 1) return emptyStore();
-	const limits: Record<string, BudgetLimit> = {};
+	const limits = newLimitsMap();
 	if (isRecord(value.limits)) {
 		for (const [rawKey, raw] of Object.entries(value.limits)) {
 			const key = normalizeKey(rawKey);
@@ -158,7 +186,7 @@ function mergeBudgetGuardLimits(
 ): BudgetGuardStore {
 	const merged: BudgetGuardStore = {
 		version: 1,
-		limits: { ...current.limits },
+		limits: Object.assign(newLimitsMap(), current.limits),
 	};
 	for (const [key, limit] of Object.entries(incoming.limits)) {
 		const existing = merged.limits[key];
@@ -243,7 +271,7 @@ export function upsertBudgetLimit(
 	if (!key) throw new Error("Budget key is required");
 	const next = normalizeLimit(key, { ...limit, key, updatedAt: now });
 	if (!next) throw new Error("Invalid budget limit");
-	store.limits[key] = next;
+	writeLimitEntry(store.limits, key, next);
 	return next;
 }
 
