@@ -3,7 +3,7 @@
 Generated: 2026-09-28
 Commit: cafa1258
 Branch: docs/architecture-rewrite
-Package version: 2.17.2
+Package version: 2.17.3
 
 ## OVERVIEW
 

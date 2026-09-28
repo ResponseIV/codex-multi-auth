@@ -5,6 +5,57 @@ Dates use ISO format (`YYYY-MM-DD`).
 
 This repository's current stable release line is `2.x`. Full release notes live in [`docs/releases/`](docs/releases/) — this file is the short version. Pre-`0.1.0` iteration history is archived in [`docs/releases/legacy-pre-0.1-history.md`](docs/releases/legacy-pre-0.1-history.md).
 
+## [2.17.3] - 2026-09-28
+
+Eighteen-PR review-and-hardening stack: OAuth redaction and boundary-trust
+fixes, cross-process CAS for governance stores, clock-skew-safe merges,
+credential-signature backup rotation, V1 migration preservation, reset-backend
+discovery for the relocated ChatGPT layout, plus perf, packaging, property and
+chaos test coverage. [Full notes](docs/releases/v2.17.3.md).
+
+### Security
+
+- Close OAuth log-redaction gaps in body and URL scrubbers — bearer ordering,
+  fragments, nested query values, encoded separators, token-like hostnames,
+  JSON key names, chunked entropy scrubbing ([#719](https://github.com/ndycode/codex-multi-auth/pull/719))
+- Enforce trust at library boundaries: audit-log `0600` re-assertion,
+  malformed token-digest rejection, Windows root-relative override refusal,
+  `AbortSignal.any` listener-leak fix ([#710](https://github.com/ndycode/codex-multi-auth/pull/710))
+- Close regex DoS on overlong email labels and timer-overflow near-zero
+  failover clamp ([#721](https://github.com/ndycode/codex-multi-auth/pull/721))
+
+### Fixed
+
+- Cross-process CAS for JSON governance stores under the directory lock ([#713](https://github.com/ndycode/codex-multi-auth/pull/713))
+- Hybrid `updatedAt` floor so clock skew cannot lose writes ([#723](https://github.com/ndycode/codex-multi-auth/pull/723))
+- Backup rotation keyed by credential signature; chained pending-auth healing ([#712](https://github.com/ndycode/codex-multi-auth/pull/712))
+- V1→V3 migration preserves hybrid-era fields and per-family indexes ([#717](https://github.com/ndycode/codex-multi-auth/pull/717))
+- `constructor`/`__proto__` keys safe in budget and routing merges ([#714](https://github.com/ndycode/codex-multi-auth/pull/714))
+- Wrapper signal relay and dead-owner shadow-home sweep safety ([#720](https://github.com/ndycode/codex-multi-auth/pull/720))
+- Active-account sync fingerprints canonical plus mirror files ([#711](https://github.com/ndycode/codex-multi-auth/pull/711))
+- Relocated ChatGPT backend discovery; ambiguous reset identities rejected ([#724](https://github.com/ndycode/codex-multi-auth/pull/724))
+
+### Performance
+
+- Linear account dedup via incremental identity indexes ([#708](https://github.com/ndycode/codex-multi-auth/pull/708))
+- Cached runtime policy stores with fingerprint validation ([#709](https://github.com/ndycode/codex-multi-auth/pull/709))
+- Fewer transform allocations; non-throwing breaker probe ([#716](https://github.com/ndycode/codex-multi-auth/pull/716))
+
+### Packaging
+
+- Ship `skills/`; live `brace-expansion` pin via self-ref override ([#722](https://github.com/ndycode/codex-multi-auth/pull/722))
+- Smaller tarball, faster typecheck, slimmer forward-path imports ([#711](https://github.com/ndycode/codex-multi-auth/pull/711))
+
+### Tests
+
+- Property coverage for storage/transformer/SSE/budget/redaction ([#714](https://github.com/ndycode/codex-multi-auth/pull/714))
+- Real fs/net fault injection and live concurrency chaos suites ([#715](https://github.com/ndycode/codex-multi-auth/pull/715))
+
+### Docs
+
+- Living documentation rewritten from audited architecture ([#718](https://github.com/ndycode/codex-multi-auth/pull/718))
+- Release hygiene: v2.17.1 notes restored, links re-aligned ([#707](https://github.com/ndycode/codex-multi-auth/pull/707))
+
 ## [2.17.2] - 2026-09-28
 
 Version resync over 2.17.1 — no functional changes. 2.17.1 was prepared but
