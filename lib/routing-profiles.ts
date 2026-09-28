@@ -108,13 +108,25 @@ function normalizeProfile(key: string, value: unknown): RoutingProfile | null {
 	};
 }
 
+// Profile keys are caller/project-derived strings — including, via a crafted
+// store file or a literal upsert, Object.prototype member names such as
+// "constructor" or "__proto__". On a plain object, reading an absent key
+// resolves an inherited member ({}.constructor === Object), which made a
+// same-named profile look "already present" to the merge and silently dropped
+// the incoming entry; writing "__proto__" invokes the setter and mutates the
+// prototype instead of storing anything. Null-prototype maps make every key a
+// plain data slot regardless of name.
+function newProfilesMap(): Record<string, RoutingProfile> {
+	return Object.create(null) as Record<string, RoutingProfile>;
+}
+
 function emptyStore(): RoutingProfileStore {
-	return { version: 1, profiles: {} };
+	return { version: 1, profiles: newProfilesMap() };
 }
 
 function normalizeStore(value: unknown): RoutingProfileStore {
 	if (!isRecord(value) || value.version !== 1) return emptyStore();
-	const profiles: Record<string, RoutingProfile> = {};
+	const profiles = newProfilesMap();
 	if (isRecord(value.profiles)) {
 		for (const [key, raw] of Object.entries(value.profiles)) {
 			const profile = normalizeProfile(key, raw);
@@ -173,7 +185,7 @@ function mergeRoutingProfiles(
 ): RoutingProfileStore {
 	const merged: RoutingProfileStore = {
 		version: 1,
-		profiles: { ...current.profiles },
+		profiles: Object.assign(newProfilesMap(), current.profiles),
 	};
 	for (const [key, profile] of Object.entries(incoming.profiles)) {
 		const existing = merged.profiles[key];
@@ -277,14 +289,22 @@ export function upsertRoutingProfile(
 	mutate?: (profile: RoutingProfile) => void,
 	now = Date.now(),
 ): RoutingProfile {
-	const next = structuredClone(
-		store.profiles[profile.projectKey] ?? profile,
-	);
+	// store.profiles may be a caller-built plain object, so absent-key reads
+	// need an own-property check and "__proto__" needs a setter-safe write.
+	const existing = Object.hasOwn(store.profiles, profile.projectKey)
+		? store.profiles[profile.projectKey]
+		: undefined;
+	const next = structuredClone(existing ?? profile);
 	mutate?.(next);
 	next.updatedAt = now;
 	const normalized = normalizeProfile(profile.projectKey, next);
 	if (!normalized) throw new Error("Invalid routing profile");
-	store.profiles[profile.projectKey] = normalized;
+	Object.defineProperty(store.profiles, profile.projectKey, {
+		value: normalized,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	});
 	return normalized;
 }
 

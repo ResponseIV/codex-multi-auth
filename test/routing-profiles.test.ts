@@ -114,4 +114,77 @@ describe("routing profiles", () => {
 		expect(context.projectKey).toMatch(/^project-/);
 		expect(context.profile).toBeNull();
 	});
+
+	it("stores profiles keyed by Object.prototype member names without loss", async () => {
+		// Profile keys are caller/project-derived strings; "constructor" and
+		// "__proto__" are valid values (crafted store file or literal upsert).
+		// On plain-object maps an absent "constructor" read resolves the
+		// inherited Object function and looked "present" to the merge — the
+		// incoming profile was silently dropped — while a "__proto__" write hit
+		// the setter and mutated the prototype. Regression: these must behave
+		// like ordinary keys end-to-end.
+		const {
+			createDefaultRoutingProfile,
+			loadRoutingProfileStore,
+			saveRoutingProfileStore,
+			upsertRoutingProfile,
+		} = await import("../lib/routing-profiles.js");
+
+		const first = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			first,
+			createDefaultRoutingProfile({
+				projectKey: "constructor",
+				projectName: "crafted",
+				identityRoot: projectDir,
+				now: 100,
+			}),
+			undefined,
+			100,
+		);
+		await saveRoutingProfileStore(first);
+
+		const loaded = await loadRoutingProfileStore();
+		expect(Object.hasOwn(loaded.profiles, "constructor")).toBe(true);
+		expect(loaded.profiles.constructor?.projectName).toBe("crafted");
+
+		// A merge keyed on the same name must not mistake the inherited member
+		// for an existing entry — the newer updatedAt must win. (upsert mutates
+		// the existing profile when the key is present, so the rename goes
+		// through `mutate`.)
+		const second = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			second,
+			createDefaultRoutingProfile({
+				projectKey: "constructor",
+				projectName: "ignored-when-existing",
+				identityRoot: projectDir,
+				now: 200,
+			}),
+			(next) => {
+				next.projectName = "crafted-newer";
+			},
+			200,
+		);
+		await saveRoutingProfileStore(second);
+		const merged = await loadRoutingProfileStore();
+		expect(merged.profiles.constructor?.projectName).toBe("crafted-newer");
+		expect(merged.profiles.constructor?.updatedAt).toBe(200);
+
+		// "__proto__" must land as an own property — not a prototype mutation.
+		const protoStore = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			protoStore,
+			createDefaultRoutingProfile({
+				projectKey: "__proto__",
+				projectName: "proto-key",
+				identityRoot: projectDir,
+			}),
+		);
+		expect(Object.hasOwn(protoStore.profiles, "__proto__")).toBe(true);
+		await saveRoutingProfileStore(protoStore);
+		expect(
+			(await loadRoutingProfileStore()).profiles["__proto__"]?.projectName,
+		).toBe("proto-key");
+	});
 });
