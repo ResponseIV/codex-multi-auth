@@ -205,21 +205,14 @@ const arbNoisyStorage = fc.constantFrom(1, 3).chain((version) =>
 	fc.record({
 		version: fc.constant(version),
 		accounts: fc.array(
-			version === 1
-				? // V1 junk rows must stay OBJECTS: migrateV1ToV3 currently throws
-					// on null/undefined entries (a real crash — pinned separately in
-					// the .fails regression below), so null stays V3-only until that
-					// bug is fixed rather than silently hiding it here.
-					fc.oneof(
-						arbAccountCore,
-						arbSparseAccount,
-						fc.constantFrom(42, "junk", [], {}),
-					)
-				: fc.oneof(
-						arbAccountCore,
-						arbSparseAccount,
-						fc.constantFrom(null, 42, "junk", [], {}),
-					),
+			// Junk rows are identical for both versions: the V3 validAccounts
+			// filter and the V1 migration's own filter both drop non-object
+			// entries (regression: a null entry used to crash migrateV1ToV3).
+			fc.oneof(
+				arbAccountCore,
+				arbSparseAccount,
+				fc.constantFrom(null, undefined, 42, "junk", [], {}),
+			),
 			{ maxLength: 8 },
 		),
 	activeIndex: fc.oneof(
@@ -317,15 +310,11 @@ describe("normalizeAccountStorage properties", () => {
 	// account.rateLimitResetTime without an isRecord guard, so a V1 file whose
 	// accounts array contains a null/undefined entry makes
 	// normalizeAccountStorage THROW a TypeError instead of returning null or a
-	// filtered storage. The V3 path (validAccounts .filter(isRecord …)) drops
-	// the same junk row gracefully, so corrupt V1 files are strictly less
-	// resilient than corrupt V3 files: the throw escapes normalize, propagates
-	// through loadAccountsFromPath, and in loadAccountsInternal it is caught as
-	// a generic read failure — the whole file is then treated as unreadable and
-	// the caller loses every account where V3 would have recovered the good
-	// rows. Pinned as .fails per suite policy: this must not pass until the
-	// migration gains a null-safe map.
-	it.fails(
+	// Regression pin: the V3 path (validAccounts .filter(isRecord …)) drops
+	// junk rows gracefully; the V1 migration now does the same — previously a
+	// null entry crashed migrateV1ToV3, the throw escaped normalize, and the
+	// whole file was treated as unreadable (losing every good row).
+	it(
 		"V1 storage with a null account entry must not throw (migrateV1ToV3 crash)",
 		() => {
 			expect(() =>
@@ -341,6 +330,80 @@ describe("normalizeAccountStorage properties", () => {
 			).not.toThrow();
 		},
 	);
+
+	// Regression pins: version:1 files can carry V3-era fields — the flagged
+	// store is `version: 1` with full V3 rows, and hand-edited or partially
+	// written hybrid files hit the same shape. The explicit-field migration
+	// used to silently drop everything it did not name.
+	it("V1 migration preserves V3-era account fields on version:1 rows", () => {
+		const future = Date.now() + 60_000;
+		const normalized = normalizeAccountStorage({
+			version: 1,
+			accounts: [
+				{
+					refreshToken: "rt-hybrid",
+					addedAt: 1,
+					lastUsed: 1,
+					rateLimitResetTimes: { codex: future },
+					workspaces: [{ id: "w1", enabled: true }],
+					currentWorkspaceIndex: 0,
+					authInvalidatedAt: 12345,
+					authInvalidationErrorCode: "invalid_token",
+					recordId: "rec-1",
+					codexCliMirror: { forAccountId: "a", accountId: "b" },
+				},
+			],
+			activeIndex: 0,
+		});
+		const account = normalized?.accounts[0];
+		expect(account?.rateLimitResetTimes?.codex).toBe(future);
+		expect(account?.workspaces).toEqual([{ id: "w1", enabled: true }]);
+		expect(account?.currentWorkspaceIndex).toBe(0);
+		expect(account?.authInvalidatedAt).toBe(12345);
+		expect(account?.authInvalidationErrorCode).toBe("invalid_token");
+		expect(account?.recordId).toBe("rec-1");
+		expect(account?.codexCliMirror).toEqual({
+			forAccountId: "a",
+			accountId: "b",
+		});
+	});
+
+	it("V1 migration lets an existing rateLimitResetTimes map win per key over the scalar", () => {
+		const scalarReset = Date.now() + 60_000;
+		const mapReset = scalarReset + 30_000;
+		const normalized = normalizeAccountStorage({
+			version: 1,
+			accounts: [
+				{
+					refreshToken: "rt",
+					addedAt: 1,
+					lastUsed: 1,
+					rateLimitResetTime: scalarReset,
+					rateLimitResetTimes: { codex: mapReset },
+				},
+			],
+			activeIndex: 0,
+		});
+		const times = normalized?.accounts[0]?.rateLimitResetTimes;
+		// The real map entry is preserved instead of being overwritten by the
+		// scalar; the scalar still fills families the map never covered.
+		expect(times?.codex).toBe(mapReset);
+		expect(times?.["gpt-5.1"]).toBe(scalarReset);
+	});
+
+	it("V1 migration honors a version:1 file's own activeIndexByFamily", () => {
+		const normalized = normalizeAccountStorage({
+			version: 1,
+			accounts: [
+				{ refreshToken: "rt-a", addedAt: 1, lastUsed: 1 },
+				{ refreshToken: "rt-b", addedAt: 2, lastUsed: 2 },
+			],
+			activeIndex: 0,
+			activeIndexByFamily: { codex: 1 },
+		});
+		expect(normalized?.activeIndexByFamily?.codex).toBe(1);
+		expect(normalized?.activeIndexByFamily?.["gpt-5.1"]).toBe(0);
+	});
 
 	it("is a fixpoint on arbitrary V1/V3-shaped input (N(N(x)) === N(x))", () => {
 		fc.assert(
