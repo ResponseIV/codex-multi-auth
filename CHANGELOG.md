@@ -5,6 +5,30 @@ Dates use ISO format (`YYYY-MM-DD`).
 
 This repository's current stable release line is `2.x`. Full release notes live in [`docs/releases/`](docs/releases/) — this file is the short version. Pre-`0.1.0` iteration history is archived in [`docs/releases/legacy-pre-0.1-history.md`](docs/releases/legacy-pre-0.1-history.md).
 
+## [2.17.1] - 2026-09-28
+
+Automatic subscription priming observes each selected workspace on its own
+record, shared-organization accounts no longer share one quota entry, and
+concurrent quota writes merge instead of clobbering. App-bind cleanup now
+works on non-English POSIX systems. [Full notes](docs/releases/v2.17.1.md).
+
+### Fixed
+
+- Automatic first-use checks prime each account's selected workspace
+  independently; quota observations are keyed by credential record and exact
+  workspace, so shared-organization accounts no longer collide and a
+  Personal-workspace check no longer deletes a valid organization entry
+  ([#706](https://github.com/ndycode/codex-multi-auth/pull/706))
+- Quota cache saves merge against a pre-edit baseline under the file lock, so
+  an older session's save can no longer discard another process's workspace
+  observation ([#706](https://github.com/ndycode/codex-multi-auth/pull/706))
+- Pending rotated credentials carry `recordId`, keeping the account's identity
+  key stable through a refresh that only persisted through the journal
+  ([#706](https://github.com/ndycode/codex-multi-auth/pull/706))
+- `unbind-app` and helper cleanup now stop owned processes on non-English
+  POSIX locales; the `ps -o lstart=` identity probe pins `LC_ALL=C`, so it
+  parses on every system instead of failing and leaking live routers
+
 ## [2.17.0] - 2026-09-26
 
 Codex CLI 0.156+ no longer refuses org-sourced accounts, and an opt-in native desktop binding adds capability-aware routing, API/ZDR pools, reset credits and Responses WebSockets. [Full notes](docs/releases/v2.17.0.md).
