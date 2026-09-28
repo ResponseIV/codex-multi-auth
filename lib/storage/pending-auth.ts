@@ -19,6 +19,7 @@ import type { AccountStorageV3 } from "./public-types.js";
 const entrySchema = z.object({
 	/** sha256 of the spent refresh token: identifies the row without storing it. */
 	prior: z.string().regex(/^[0-9a-f]{64}$/),
+	recordId: z.string().trim().min(1).optional(),
 	refreshToken: z.string().min(1),
 	accessToken: z.string().min(1),
 	expiresAt: z.number(),
@@ -72,7 +73,7 @@ async function write(path: string, entries: PendingAuth[]): Promise<void> {
 /** Record a rotated credential beside the account pool. */
 export async function recordPendingAuth(
 	storagePath: string,
-	auth: { priorRefreshToken: string; refreshToken: string; accessToken: string; expiresAt: number; at: number },
+	auth: { priorRefreshToken: string; recordId?: string; refreshToken: string; accessToken: string; expiresAt: number; at: number },
 ): Promise<void> {
 	const path = getPendingAuthPath(storagePath);
 	await withFileTransactionLock(path, async () => {
@@ -88,8 +89,8 @@ export async function recordPendingAuth(
 		// the original spent token, so extend that entry rather than add one that
 		// no disk row can match.
 		const chained = entries.find((entry) => entry.refreshToken === auth.priorRefreshToken);
-		const current = chained ?? { prior, refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at };
-		if (chained) Object.assign(chained, { refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at });
+		const current = chained ?? { prior, recordId: auth.recordId, refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at };
+		if (chained) Object.assign(chained, { recordId: chained.recordId ?? auth.recordId, refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at });
 		else entries.push(current);
 		const excess = entries.length - MAX_ENTRIES;
 		if (excess > 0) {
@@ -124,6 +125,7 @@ export async function applyPendingAuth(
 	for (const account of storage.accounts) {
 		const entry = account.refreshToken ? entries.find((item) => item.prior === hash(account.refreshToken)) : undefined;
 		if (!entry) continue;
+		account.recordId ??= entry.recordId;
 		account.refreshToken = entry.refreshToken;
 		account.accessToken = entry.accessToken;
 		account.expiresAt = entry.expiresAt;

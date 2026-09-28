@@ -141,3 +141,35 @@ it("still reads and trims an over-cap journal an earlier writer left behind", as
 	await recordPendingAuth(storagePath, { ...rotation("spent-a", "new-a"), at: 5000 });
 	expect(JSON.parse(await fs.readFile(path, "utf8")).entries).toHaveLength(1000);
 });
+
+it("preserves the automatic attempt identity when legacy credentials recover from a failed save", async () => {
+    const { resolveAccountRecordId } = await import("../lib/accounts.js");
+    const { automaticAccountCheckKey } = await import("../lib/runtime/automatic-account-checks.js");
+    const pool = storage();
+    const original = pool.accounts[0]!;
+    const key = automaticAccountCheckKey(original);
+    const auth = { ...rotation("spent-a", "new-a"), recordId: resolveAccountRecordId(original) };
+    await recordPendingAuth(storagePath, auth);
+    await recordPendingAuth(storagePath, rotation("new-a", "newer-a"));
+    const restored = await applyPendingAuth(storagePath, pool);
+    expect(restored?.accounts[0]?.refreshToken).toBe("newer-a");
+    expect(automaticAccountCheckKey(restored!.accounts[0]!)).toBe(key);
+});
+
+it("saves recovered legacy credentials without changing the original record identity", async () => {
+    const storageModule = await import("../lib/storage.js");
+    const { AccountManager, resolveAccountRecordId } = await import("../lib/accounts.js");
+    storageModule.setStoragePathDirect(storagePath);
+    const pool = storage();
+    await storageModule.saveAccounts(pool);
+    const originalId = resolveAccountRecordId(pool.accounts[0]!);
+    const manager = new AccountManager(undefined, await storageModule.loadAccounts());
+    const transaction = vi.spyOn(storageModule, "withAccountStorageTransaction").mockRejectedValueOnce(Object.assign(new Error("busy"), {code:"EBUSY"}));
+    try {
+        await manager.commitRefreshedAuth(manager.getAccountByIndex(0)!, {type:"oauth",refresh:"rotated",access:"access-rotated",expires:Date.now()+3600000});
+    } finally { transaction.mockRestore(); }
+    await manager.flushPendingSave();
+    const saved = await storageModule.loadAccounts();
+    expect(saved?.accounts).toHaveLength(2);
+    expect(saved?.accounts[0]).toMatchObject({ recordId: originalId, refreshToken: "rotated" });
+});

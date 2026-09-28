@@ -1864,7 +1864,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("does not mutate loaded quota cache when live forecast display save fails", async () => {
@@ -1944,7 +1944,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("persists the working quota cache for live forecast display mode", async () => {
@@ -2016,7 +2016,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 		expect(
 			logSpy.mock.calls.some((call) =>
 				String(call[0]).includes("Best-account preview"),
@@ -3149,7 +3149,7 @@ describe("codex manager cli commands", () => {
 			expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledWith({
 				byAccountId: {},
 				byEmail: {},
-			});
+			}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 			expect(storageMocks.saveAccounts).toHaveBeenCalledTimes(1);
 			expect(storageMocks.saveAccounts.mock.calls[0]?.[0]?.accounts?.[0]?.email).toBe(
 				"owner@example.com",
@@ -3309,7 +3309,7 @@ describe("codex manager cli commands", () => {
 						},
 					},
 				},
-			});
+			}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 		} finally {
 			extractAccountIdMock.mockReset();
 			extractAccountIdMock.mockImplementation(() => "acc_test");
@@ -3585,7 +3585,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("runs fix apply mode and returns a switch recommendation", async () => {
@@ -7543,7 +7543,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("writes shared workspace quota cache entries by email without reusing bare accountId keys", async () => {
@@ -7658,7 +7658,7 @@ describe("codex manager cli commands", () => {
 					},
 				},
 			},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("writes multi-workspace quota cache entries by accountId when one email spans multiple workspaces", async () => {
@@ -7783,7 +7783,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("skips live probe when same-email workspaces still lack stored accountIds", async () => {
@@ -7993,7 +7993,7 @@ describe("codex manager cli commands", () => {
 					},
 				},
 				byEmail: {},
-			});
+			}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 		} finally {
 			extractAccountIdMock.mockReset();
 			extractAccountIdMock.mockImplementation(() => "acc_test");
@@ -11816,7 +11816,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 	});
 
 	it("treats a quota cache save failure as a partial-success warning, not a hard failure", async () => {
@@ -11972,7 +11972,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 		expect(
 			logSpy.mock.calls.some((call) =>
 				String(call[0]).includes("Auto-fix scan"),
@@ -12098,7 +12098,7 @@ describe("codex manager cli commands", () => {
 		expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledWith({
 			byAccountId: {},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 		expect(storageMocks.saveAccounts).toHaveBeenCalledTimes(1);
 		expect(storageMocks.saveAccounts.mock.calls[0]?.[0]?.accounts?.[0]?.email).toBe(
 			"owner@example.com",
@@ -12261,7 +12261,7 @@ describe("codex manager cli commands", () => {
 						},
 					},
 				},
-			});
+			}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 
 			const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
 				reports: Array<{ outcome: string }>;
@@ -12428,7 +12428,7 @@ describe("codex manager cli commands", () => {
 				},
 			},
 			byEmail: {},
-		});
+		}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
 		expect(storageMocks.saveAccounts).toHaveBeenCalledTimes(1);
 		expect(storageMocks.saveAccounts.mock.calls[0]?.[0]?.accounts?.[0]?.accountId).toBe(
 			"workspace-alpha",

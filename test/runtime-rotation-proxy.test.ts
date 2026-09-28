@@ -5521,3 +5521,21 @@ it("stops a stored pin after refresh disables its only workspace",async()=>{
  expect(refresh).toHaveBeenCalledTimes(1);
  expect(calls.filter(c=>c.url.endsWith("/responses"))).toHaveLength(0);
 });
+
+it("routes with scoped Personal quota while keeping exhausted shared organization bindings separate", async () => {
+ const { updateQuotaCacheForWorkspace, updateQuotaCacheForAccount } = await import("../lib/codex-manager/quota-cache-helpers.js");
+ const now = Date.now();
+ const storage = createStorage(now);
+ storage.accounts.forEach((account, i) => { account.recordId=`fixture-${i}`; account.accountId="shared-org"; account.currentWorkspaceIndex=1; account.workspaces=[{id:"shared-org",enabled:true},{id:`personal-${i}`,enabled:true}]; });
+ const cache = {byAccountId:{},byEmail:{}};
+ for (const [i,account] of storage.accounts.entries()) {
+  updateQuotaCacheForAccount(cache,account,{status:200,model:"common",primary:{usedPercent:100,resetAtMs:now+3600000},secondary:{}},storage.accounts);
+  updateQuotaCacheForWorkspace(cache,account,`personal-${i}`,{status:200,model:"common",planType:"pro",primary:{usedPercent:i===0?100:30,resetAtMs:now+3600000},secondary:{}},storage.accounts);
+ }
+ const manager=new AccountManager(undefined,storage);
+ const {calls,fetchImpl}=createRecordingFetch(call=>call.url.includes("/models")?Response.json({models:[{slug:"common"}]}):textEventStream('data: {"type":"response.completed","response":{}}\n\n'));
+ const proxy=await startProxy({accountManager:manager,fetchImpl,options:{nativeOpenai:true,readSubscriptionQuota:async()=>cache,quotaRemainingPercentThreshold:undefined}});
+ const response=await postResponses(proxy,{model:"common",input:"fixture",stream:true});
+ expect(response.status).toBe(200);await response.text();
+ expect(calls.filter(c=>c.url.includes("/responses")).map(c=>c.headers.get("chatgpt-account-id"))).toEqual(["personal-1"]);
+});

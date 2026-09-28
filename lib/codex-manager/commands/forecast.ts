@@ -54,7 +54,7 @@ export interface ForecastCommandDeps {
 	loadDashboardDisplaySettings?: () => Promise<DashboardDisplaySettings>;
 	resolveActiveIndex: (storage: AccountStorageV3, family?: "codex") => number;
 	loadQuotaCache: () => Promise<QuotaCacheData | null>;
-	saveQuotaCache: (cache: QuotaCacheData) => Promise<void>;
+	saveQuotaCache: (cache: QuotaCacheData, baseline?: QuotaCacheData) => Promise<void>;
 	cloneQuotaCacheData: (cache: QuotaCacheData) => QuotaCacheData;
 	buildQuotaEmailFallbackState: (
 		accounts: readonly Pick<AccountMetadataV3, "accountId" | "email">[],
@@ -415,7 +415,7 @@ export async function runForecastCommand(
 	if (options.json) {
 		if (workingQuotaCache && quotaCacheChanged) {
 			try {
-				await deps.saveQuotaCache(workingQuotaCache);
+				await deps.saveQuotaCache(workingQuotaCache, quotaCache ?? undefined);
 			} catch (error) {
 				// Quota cache is a derived artifact; a transient Windows EBUSY/
 				// EPERM here must not abort the JSON forecast output.
@@ -587,7 +587,7 @@ export async function runForecastCommand(
 	}
 	if (workingQuotaCache && quotaCacheChanged) {
 		try {
-			await deps.saveQuotaCache(workingQuotaCache);
+			await deps.saveQuotaCache(workingQuotaCache, quotaCache ?? undefined);
 		} catch (error) {
 			// Quota cache is a derived artifact; tolerate transient Windows
 			// EBUSY/EPERM rather than aborting the forecast.

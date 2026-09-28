@@ -2139,7 +2139,9 @@ describe("AccountManager", () => {
 				Object.assign(new Error("EBUSY"), { code: "EBUSY" }),
 			);
 
-			const now = Date.now();
+			const storageModule = await import("../lib/storage.js");
+            const journal = vi.spyOn(storageModule, "recordPendingAuth").mockResolvedValue(undefined);
+            const now = Date.now();
 			const stored = {
 				version: 3 as const,
 				activeIndex: 0,
@@ -2168,6 +2170,9 @@ describe("AccountManager", () => {
 
 			expect(committed).toBe(account);
 			expect(account.refreshToken).toBe("new-refresh");
+            const { resolveAccountRecordId } = await import("../lib/accounts.js");
+            expect(journal).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({recordId: resolveAccountRecordId(stored.accounts[0]!)}));
+            journal.mockRestore();
 		});
 
 		it("propagates non-transient storage write failure as terminal CodexAuthError", async () => {

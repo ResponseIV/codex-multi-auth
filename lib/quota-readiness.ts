@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
+import { resolveAccountRecordId } from "./storage/record-identity.js";
 import type { QuotaCacheData, QuotaCacheEntry, QuotaCacheWindow } from "./quota-cache.js";
 import type { AccountMetadataV3 } from "./storage.js";
 
-export type QuotaCacheAccountRef = Pick<AccountMetadataV3, "accountId" | "email">;
+export type QuotaCacheAccountRef = Pick<AccountMetadataV3, "accountId" | "email" | "recordId" | "workspaces" | "currentWorkspaceIndex"> & Partial<Pick<AccountMetadataV3, "refreshToken" | "addedAt">>;
 
 type QuotaWindowLike = Pick<QuotaCacheWindow, "usedPercent" | "resetAtMs" | "windowMinutes">;
 
@@ -128,20 +130,41 @@ export function isQuotaCacheEntryExhausted(
 	);
 }
 
+/** Cache identity includes the credential record, so shared organization IDs cannot collide. */
+export function quotaWorkspaceKey(account: QuotaCacheAccountRef, workspaceId: string): string | undefined {
+    const recordId = account.recordId?.trim() || (account.refreshToken !== undefined && account.addedAt !== undefined
+        ? resolveAccountRecordId({ ...account, refreshToken: account.refreshToken, addedAt: account.addedAt }) : undefined);
+    return recordId ? createHash("sha256").update(JSON.stringify(["oauth", recordId, workspaceId.trim()])).digest("hex") : undefined;
+}
+
+/** Display the selected workspace; callers routing another scope must pass that exact workspace. */
+export function quotaWorkspaceId(account: QuotaCacheAccountRef): string | undefined {
+    return account.workspaces?.length
+        ? account.workspaces[account.currentWorkspaceIndex ?? 0]?.id.trim()
+        : account.accountId?.trim();
+}
+
+/** Read exact-workspace quota, using legacy binding entries only for that binding. */
 export function findQuotaCacheEntryForAccount(
 	cache: QuotaCacheData | null | undefined,
 	account: QuotaCacheAccountRef,
 	accounts: readonly QuotaCacheAccountRef[],
 	emailFallbackState = buildQuotaEmailFallbackState(accounts),
+	workspaceId = quotaWorkspaceId(account),
 ): QuotaCacheEntry | null {
 	if (!cache) return null;
-	const accountId = normalizeQuotaAccountId(account.accountId);
+	const key = workspaceId && quotaWorkspaceKey(account, workspaceId);
+    const scoped = key ? cache.byWorkspace?.[key] : undefined;
+    // Legacy entries describe only the stored binding, never a sibling workspace.
+    if (normalizeQuotaAccountId(workspaceId) !== normalizeQuotaAccountId(account.accountId)) return scoped ?? null;
+    const accountId = normalizeQuotaAccountId(account.accountId);
+    const newer = (legacy: QuotaCacheEntry | undefined) => scoped && (!legacy || scoped.updatedAt >= legacy.updatedAt) ? scoped : legacy ?? null;
 	if (accountId && hasUniqueQuotaAccountId(accounts, account) && cache.byAccountId[accountId]) {
-		return cache.byAccountId[accountId] ?? null;
+		return newer(cache.byAccountId[accountId]);
 	}
 	const email = normalizeQuotaEmail(account.email);
 	if (email && hasSafeQuotaEmailFallback(emailFallbackState, account) && cache.byEmail[email]) {
-		return cache.byEmail[email] ?? null;
+		return newer(cache.byEmail[email]);
 	}
-	return null;
+	return scoped ?? null;
 }

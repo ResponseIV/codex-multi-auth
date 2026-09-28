@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { z } from "zod";
+import { resolveAccountRecordId } from "../accounts.js";
+import { extractAccountId } from "../auth/token-utils.js";
 import { getAccountPolicyKey, type AccountPolicyStore } from "../account-policy.js";
-import type { AccountStorageV3 } from "../storage.js";
+import type { AccountMetadataV3, AccountStorageV3 } from "../storage.js";
 import { withFileTransactionLock } from "../storage/file-lock.js";
 import { withRetry } from "../fs-retry.js";
 import { tempPathFor } from "../temp-path.js";
@@ -21,6 +24,28 @@ export interface AutomaticAccountCheckOptions {
     now?: () => number;
     signal?: AbortSignal;
 }
+/** Honor the saved selection; a disabled/invalid selection must not fall back to a sibling. */
+export function automaticCheckWorkspaceId(account: AccountMetadataV3): string | undefined {
+    if (account.workspaces?.length) {
+        const selected = account.workspaces[account.currentWorkspaceIndex ?? 0];
+        return selected?.enabled === false ? undefined : selected?.id.trim() || undefined;
+    }
+    return account.accountId?.trim() || extractAccountId(account.accessToken) || undefined;
+}
+
+/** Policy keys can be shared by organization members; attempt limits must never be. */
+export function automaticAccountCheckKey(account: AccountMetadataV3): string {
+    return workspaceAttemptKey(account, automaticCheckWorkspaceId(account) ?? "");
+}
+
+/** Build the same key for inactive workspaces while pruning the attempt journal. */
+function workspaceAttemptKey(account: AccountMetadataV3, workspaceId: string): string {
+    return `sha256:${createHash("sha256").update(JSON.stringify([
+        "automatic-check-v2", resolveAccountRecordId(account), workspaceId,
+    ])).digest("hex")}`;
+}
+
+/** Reject unreadable or oversized history rather than silently allowing duplicate probes. */
 async function readAttempts(path: string): Promise<Record<string, number>> {
     try {
         const raw = await withRetry(() => fs.readFile(path, "utf8"), retry);
@@ -34,6 +59,7 @@ async function readAttempts(path: string): Promise<Record<string, number>> {
         throw error;
     }
 }
+/** Atomically persist attempt timestamps before any billable network request. */
 async function saveAttempts(path: string, attempts: Record<string, number>): Promise<void> {
     const temp = tempPathFor(path);
     try {
@@ -55,7 +81,11 @@ export async function runAutomaticAccountChecks(options: AutomaticAccountCheckOp
         if (!storage || signal.aborted)
             return;
         const attempts = await readAttempts(options.path);
-        const keys = new Set(storage.accounts.map(a => getAccountPolicyKey(a)));
+        // Keep every still-saved workspace's throttle, including temporarily disabled selections.
+        const keys = new Set(storage.accounts.flatMap(account => [
+            automaticAccountCheckKey(account),
+            ...(account.workspaces ?? []).map(workspace => workspaceAttemptKey(account, workspace.id.trim())),
+        ]));
         for (const key of Object.keys(attempts))
             if (!keys.has(key))
                 delete attempts[key];
@@ -65,7 +95,7 @@ export async function runAutomaticAccountChecks(options: AutomaticAccountCheckOp
             const account = storage.accounts[index];
             if (!account)
                 continue;
-            const key = getAccountPolicyKey(account), policy = policies.accounts[key], now = options.now?.() ?? Date.now();
+            const key = automaticAccountCheckKey(account), policy = policies.accounts[getAccountPolicyKey(account)], now = options.now?.() ?? Date.now();
             if (!policy?.autoPrime || policy.paused || policy.drained || account.enabled === false || account.authInvalidatedAt || (account.coolingDownUntil ?? 0) > now)
                 continue;
             const lastAttempt = attempts[key];

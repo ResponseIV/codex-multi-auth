@@ -1,9 +1,10 @@
-import { existsSync, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
 import { withRetry } from "./fs-retry.js";
 import { logWarn } from "./logger.js";
 import { getCodexMultiAuthDir } from "./runtime-paths.js";
 import { tempPathFor } from "./temp-path.js";
+import { withFileTransactionLock } from "./storage/file-lock.js";
 import { isRecord } from "./utils.js";
 
 export interface QuotaCacheWindow {
@@ -24,12 +25,16 @@ export interface QuotaCacheEntry {
 export interface QuotaCacheData {
 	byAccountId: Record<string, QuotaCacheEntry>;
 	byEmail: Record<string, QuotaCacheEntry>;
+	/** Quota scoped to a saved credential record and exact workspace. */
+	byWorkspace?: Record<string, QuotaCacheEntry>;
 }
 
 interface QuotaCacheFile {
 	version: 1;
 	byAccountId: Record<string, QuotaCacheEntry>;
 	byEmail: Record<string, QuotaCacheEntry>;
+	/** Quota scoped to a saved credential record and exact workspace. */
+	byWorkspace?: Record<string, QuotaCacheEntry>;
 }
 
 const QUOTA_CACHE_PATH = join(getCodexMultiAuthDir(), "quota-cache.json");
@@ -159,33 +164,53 @@ export function getQuotaCachePath(): string {
  *          will be empty if the on-disk file is absent, malformed, or could not be read.
  */
 export async function loadQuotaCache(): Promise<QuotaCacheData> {
-	if (!existsSync(QUOTA_CACHE_PATH)) {
-		return { byAccountId: {}, byEmail: {} };
-	}
-
 	try {
-		const content = await readCacheFileWithRetry(QUOTA_CACHE_PATH);
-		const parsed = JSON.parse(content) as unknown;
-		if (!isRecord(parsed)) {
-			return { byAccountId: {}, byEmail: {} };
-		}
-		if (parsed.version !== 1) {
-			logWarn(`Quota cache rejected due to version mismatch: ${String(parsed.version)}`);
-			return { byAccountId: {}, byEmail: {} };
-		}
-
-		return {
-			byAccountId: normalizeEntryMap(parsed.byAccountId),
-			byEmail: normalizeEntryMap(parsed.byEmail),
-		};
+		return await readQuotaCache();
 	} catch (error) {
-		logWarn(
-			`Failed to load quota cache from ${QUOTA_CACHE_LABEL}: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		);
+		logWarn(`Failed to load quota cache from ${QUOTA_CACHE_LABEL}: ${error instanceof Error ? error.message : String(error)}`);
 		return { byAccountId: {}, byEmail: {} };
 	}
+}
+
+/** Only a missing file is empty for writers; read failures must never erase concurrent data. */
+async function readQuotaCache(): Promise<QuotaCacheData> {
+	let content: string;
+	try {
+		content = await readCacheFileWithRetry(QUOTA_CACHE_PATH);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { byAccountId: {}, byEmail: {} };
+		throw error;
+	}
+	const parsed: unknown = JSON.parse(content);
+	if (!isRecord(parsed) || parsed.version !== 1) {
+		throw Error("Quota cache rejected due to version mismatch or invalid payload");
+	}
+	return {
+		byAccountId: normalizeEntryMap(parsed.byAccountId),
+		byEmail: normalizeEntryMap(parsed.byEmail),
+		...(parsed.byWorkspace ? { byWorkspace: normalizeEntryMap(parsed.byWorkspace) } : {}),
+	};
+}
+
+/** Reapply this run's changed entries, preserving unrelated or newer concurrent observations. */
+function mergeQuotaChanges(current: QuotaCacheData, proposed: QuotaCacheData, baseline: QuotaCacheData): QuotaCacheData {
+	const same = (a: QuotaCacheEntry | undefined, b: QuotaCacheEntry | undefined) => JSON.stringify(a) === JSON.stringify(b);
+	for (const namespace of ["byAccountId", "byEmail", "byWorkspace"] as const) {
+		const before = baseline[namespace] ?? {}, next = proposed[namespace] ?? {};
+		for (const key of new Set([...Object.keys(before), ...Object.keys(next)])) {
+			if (same(before[key], next[key])) continue;
+			const latest = current[namespace]?.[key], update = next[key];
+			if (update) {
+				if (!latest || update.updatedAt >= latest.updatedAt) {
+					current[namespace] ??= {};
+					current[namespace][key] = update;
+				}
+			} else if (same(latest, before[key])) {
+				delete current[namespace]?.[key];
+			}
+		}
+	}
+	return current;
 }
 
 /**
@@ -195,8 +220,9 @@ export async function loadQuotaCache(): Promise<QuotaCacheData> {
  * quota cache path. Failures are logged and do not throw, so callers should handle
  * eventual consistency or retry as needed.
  *
- * Concurrency: concurrent writers may race and overwrite each other; callers should
- * serialize writes if strong consistency is required.
+ * Concurrency: reload, apply changes since `baseline`, and atomically write under
+ * a cross-process lock. Pass the pre-edit snapshot for read–modify–write callers.
+ * Without a baseline, supplied entries are upserts; omitted entries are retained.
  *
  * Filesystem notes: Windows path length, permissions, or antivirus locks may cause
  * write failures; such errors are logged rather than thrown.
@@ -206,52 +232,54 @@ export async function loadQuotaCache(): Promise<QuotaCacheData> {
  *
  * @param data - The quota cache data (byAccountId and byEmail maps) to persist; callers
  *               should pass normalized QuotaCacheData.
+ * @param baseline - The unmodified pre-edit snapshot; only changes since it are applied.
  */
-export async function saveQuotaCache(data: QuotaCacheData): Promise<void> {
-	const payload: QuotaCacheFile = {
-		version: 1,
-		byAccountId: data.byAccountId,
-		byEmail: data.byEmail,
-	};
+export async function saveQuotaCache(data: QuotaCacheData, baseline: QuotaCacheData = { byAccountId: {}, byEmail: {} }): Promise<void> {
+	// Snapshot at invocation, not after waiting behind other writers.
+	const proposed = structuredClone(data), before = structuredClone(baseline);
 
 	const writeTask = async (): Promise<void> => {
 		try {
-			const cacheDir = getCodexMultiAuthDir();
-			// The quota cache lives alongside other at-rest secrets, so keep the
-			// directory owner-only on POSIX (mode is a no-op on win32 / ACL-based).
-			await fs.mkdir(cacheDir, { recursive: true, mode: 0o700 });
-			// mkdir's mode only applies to a freshly-created dir; an upgrade with a
-			// pre-existing multi-auth dir keeps its old (possibly world-listable)
-			// perms, so re-assert 0o700 on POSIX. Best-effort: a chmod failure must
-			// not break the cache write (the 0o600 file below still protects data).
-			if (process.platform !== "win32") {
-				try {
-					await fs.chmod(cacheDir, 0o700);
-				} catch {
-					// Best-effort hardening only.
-				}
-			}
-			const tempPath = tempPathFor(QUOTA_CACHE_PATH);
-			await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, {
-				encoding: "utf8",
-				mode: 0o600,
-			});
-			let renamed = false;
-			try {
-				await withRetry(() => fs.rename(tempPath, QUOTA_CACHE_PATH), {
-					maxAttempts: 5,
-					backoffMs: (attempt) => 10 * 2 ** (attempt - 1),
-				});
-				renamed = true;
-			} finally {
-				if (!renamed) {
+			await withFileTransactionLock(QUOTA_CACHE_PATH, async () => {
+				const merged = mergeQuotaChanges(await readQuotaCache(), proposed, before);
+				const payload: QuotaCacheFile = { version: 1, ...merged };
+				const cacheDir = getCodexMultiAuthDir();
+				// The quota cache lives alongside other at-rest secrets, so keep the
+				// directory owner-only on POSIX (mode is a no-op on win32 / ACL-based).
+				await fs.mkdir(cacheDir, { recursive: true, mode: 0o700 });
+				// mkdir's mode only applies to a freshly-created dir; an upgrade with a
+				// pre-existing multi-auth dir keeps its old (possibly world-listable)
+				// perms, so re-assert 0o700 on POSIX. Best-effort: a chmod failure must
+				// not break the cache write (the 0o600 file below still protects data).
+				if (process.platform !== "win32") {
 					try {
-						await fs.unlink(tempPath);
+						await fs.chmod(cacheDir, 0o700);
 					} catch {
-						// Best effort temp cleanup.
+						// Best-effort hardening only.
 					}
 				}
-			}
+				const tempPath = tempPathFor(QUOTA_CACHE_PATH);
+				await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, {
+					encoding: "utf8",
+					mode: 0o600,
+				});
+				let renamed = false;
+				try {
+					await withRetry(() => fs.rename(tempPath, QUOTA_CACHE_PATH), {
+						maxAttempts: 5,
+						backoffMs: (attempt) => 10 * 2 ** (attempt - 1),
+					});
+					renamed = true;
+				} finally {
+					if (!renamed) {
+						try {
+							await fs.unlink(tempPath);
+						} catch {
+							// Best effort temp cleanup.
+						}
+					}
+				}
+			});
 		} catch (error) {
 			logWarn(
 				`Failed to save quota cache to ${QUOTA_CACHE_LABEL}: ${

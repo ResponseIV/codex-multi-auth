@@ -348,12 +348,30 @@ completion for that account (default: off). `account policy list` and `status`
 show the setting; their JSON outputs include `autoPrime`.
 
 While a CLI/app router is running, it checks opted-in subscription accounts
-every 15 minutes. It completes the tiny response only for a personal subscription
+every 15 minutes. Each saved account and selected workspace has an independent
+attempt limit, including accounts sharing an organization. Checks use the saved
+workspace selection (choose Personal for a Personal subscription); accounts without
+workspace metadata use their stored binding. A disabled selection is skipped,
+not replaced by another workspace. Selection and credentials are revalidated after
+refresh, without changing the saved selection or desktop login.
+Quota observations are cached per saved credential and workspace. Status reads the
+selected workspace; routing reads the exact request workspace, so Personal quota
+never stands in for organization quota. Existing organization observations survive
+Personal checks and switching back. All quota-cache writers merge their changes
+under a shared file lock to preserve observations from concurrent checks.
+Workspace switches and recovered token
+rotations preserve the existing per-workspace attempt limit.
+
+It completes the tiny response only for a personal subscription
 with zero usage and no established reset countdown. This consumes subscription
 quota. Paused, drained, disabled, invalidated, and cooling accounts are skipped;
 API/ZDR credentials and reset credits are never used. The private
 `<accounts-file>.automatic-checks.json` stores only hashed keys and attempt times
-to prevent duplicate attempts across router processes. Stopping the router stops
+to prevent duplicate attempts across router processes. Older organization-keyed
+attempts are discarded on upgrade, so an opted-in account can be checked once
+immediately. A check attempt is not proof of completed priming. A tiny completed
+response can still display 100% remaining; an advancing reset countdown confirms
+the window has started. Stopping the router stops
 these checks; this setting does not create an OS scheduled task. Manual `check`
 still needs `--prime`, regardless of account policy.
 
@@ -836,6 +854,10 @@ failure.
   (default off) authorizes recurring router checks every 15 minutes, with durable
   cross-process attempt limits in `<accounts-file>.automatic-checks.json`. Use
   `check accounts|resets|capabilities` to run one portion; unknown arguments exit 1.
+- Automatic priming follows the saved workspace selection and throttles by saved
+  record plus workspace, so members of one organization are checked independently.
+  Old attempt keys are pruned automatically; no npm scripts or manual storage
+  migration steps are added by this fix.
 - `status` labels the forecast as "Forecast suggestion". `status --json` adds
   `apiAccounts`, `totalAccountCount`, `selectionMode`, `modelInventory`, and
   per-account priority, forecast, and reset-credit fields.
