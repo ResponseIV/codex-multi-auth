@@ -81,6 +81,39 @@ describe("local client tokens", () => {
 		expect(store.tokens.filter((token) => token.revokedAt !== null)).toHaveLength(2);
 	});
 
+	it.each([
+		"sha256:not-hex-at-all",
+		`sha256:${"ab".repeat(32)}`.slice(0, -1), // 63 hex chars — one short
+		"sha256:", // empty digest
+		`sha256:${"AB".repeat(32)}`, // uppercase hex decodes fine but must still match bytes
+	])(
+		"returns null when a persisted tokenHash is malformed or mismatched: %s",
+		async (storedHash) => {
+			const {
+				addLocalClientToken,
+				saveLocalClientTokenStore,
+				loadLocalClientTokenStore,
+				verifyLocalClientBearerToken,
+			} = await import("../lib/local-client-tokens.js");
+
+			const created = await addLocalClientToken({ label: "victim", now: 100 });
+
+			// Persist a record whose tokenHash survives normalizeRecord (it only
+			// requires the "sha256:" prefix) but fails sha256DigestBytes' strict
+			// 64-hex shape, or decodes to bytes that don't match the bearer token.
+			const store = await loadLocalClientTokenStore();
+			const record = store.tokens.find((t) => t.id === created.record.id);
+			expect(record).toBeDefined();
+			record!.tokenHash = storedHash;
+			await saveLocalClientTokenStore(store);
+
+			// tokenHashEqual must reject via digest validation without throwing.
+			expect(
+				await verifyLocalClientBearerToken(`Bearer ${created.plainToken}`, 200),
+			).toBeNull();
+		},
+	);
+
 	it("debounces lastUsedAt persistence across rapid verifies", async () => {
 		const { addLocalClientToken, loadLocalClientTokenStore, verifyLocalClientBearerToken } =
 			await import("../lib/local-client-tokens.js");

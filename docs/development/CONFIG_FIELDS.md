@@ -324,7 +324,7 @@ Cross-process refresh lease knobs: `CODEX_AUTH_REFRESH_LEASE`, `CODEX_AUTH_REFRE
 | `CODEX_MULTI_AUTH_FORCE_ACCOUNT` | Force one account for a single forwarded `codex-multi-auth-codex` run (`index`, email, or id). Ephemeral and fail-hard; equivalent to `--account` (flag wins when both are set). Requires the runtime rotation proxy |
 | `CODEX_MULTI_AUTH_FORCE_ACCOUNT_INDEX` | Internal: wrapper publishes a resolved 0-based index after `--account` / `CODEX_MULTI_AUTH_FORCE_ACCOUNT`. Runtime proxy consumes it as an ephemeral pin. Prefer `CODEX_MULTI_AUTH_FORCE_ACCOUNT` rather than setting this by hand |
 | `CODEX_MULTI_AUTH_SYNC_CODEX_CLI` | Toggle Codex CLI state sync |
-| `CODEX_MULTI_AUTH_REAL_CODEX_BIN` | Force official Codex binary path |
+| `CODEX_MULTI_AUTH_REAL_CODEX_BIN` | Force official Codex binary path (must be an absolute path; relative values are rejected) |
 | `CODEX_MULTI_AUTH_BYPASS` | Bypass local auth handling |
 | `CODEX_MULTI_AUTH_FORCE_FILE_AUTH_STORE` | Opt out of wrapper-injected official Codex file-backed auth store when set to `0`; also skips the wrapper-startup `config.toml` reconcile (`scripts/codex.js`) |
 | `CODEX_MULTI_AUTH_ENFORCE_CLI_FILE_AUTH_STORE` | Opt out of persisting `cli_auth_credentials_store = "file"` into `~/.codex/config.toml` when set to `0` (`lib/codex-cli/writer.ts`) |

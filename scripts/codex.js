@@ -26,6 +26,7 @@ import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+	isFullyQualifiedBinOverride,
 	isWindowsShimPath,
 	resolveRealCodexBin as resolveRealCodexBinFromEnvironment,
 	resolveWindowsShimPackageEntry,
@@ -1346,6 +1347,15 @@ async function autoSyncManagerActiveSelectionIfEnabled() {
 function resolveRealCodexBin() {
 	const override = (process.env.CODEX_MULTI_AUTH_REAL_CODEX_BIN ?? "").trim();
 	if (override.length > 0) {
+		// Fully-qualified = absolute AND drive-qualified on Windows: a
+		// root-relative override like "\bin\codex.exe" resolves against the cwd's
+		// drive and could exec a planted file (CWE-426).
+		if (!isFullyQualifiedBinOverride(override, process.platform)) {
+			console.error(
+				`CODEX_MULTI_AUTH_REAL_CODEX_BIN must be a fully-qualified absolute path (a drive-qualified or UNC path on Windows), got: ${override}`,
+			);
+			return null;
+		}
 		if (!existsSync(override)) {
 			console.error(
 				`CODEX_MULTI_AUTH_REAL_CODEX_BIN is set but missing: ${override}`,
