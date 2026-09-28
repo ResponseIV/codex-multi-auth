@@ -225,7 +225,7 @@ Every `pluginConfig` field above has a corresponding `get*` accessor in `lib/con
 | `CODEX_AUTH_PROACTIVE_GUARDIAN*` | refresh guardian |
 | `CODEX_AUTH_NETWORK_ERROR_COOLDOWN_MS` / `CODEX_AUTH_SERVER_ERROR_COOLDOWN_MS` | failure cooldowns |
 | `CODEX_AUTH_TOKEN_INVALIDATION_COOLDOWN_MS` / `CODEX_AUTH_MIN_ROTATION_INTERVAL_MS` | anti-abuse |
-| `CODEX_AUTH_STORAGE_BACKUP_ENABLED` | storage backups |
+| `CODEX_AUTH_STORAGE_BACKUP_ENABLED` / `CODEX_AUTH_STORAGE_BACKUP_MIN_INTERVAL_MS` | storage backups (0 = rotate on every save) |
 | `CODEX_AUTH_PREEMPTIVE_QUOTA_*` | preemptive quota |
 | `CODEX_AUTH_PID_OFFSET_ENABLED` / `CODEX_AUTH_ROUTING_MUTEX` / `CODEX_AUTH_SCHEDULING_STRATEGY` | selection strategy |
 | `CODEX_AUTH_FETCH_TIMEOUT_MS` / `CODEX_AUTH_STREAM_STALL_TIMEOUT_MS` | timeouts |

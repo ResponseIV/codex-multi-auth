@@ -1,6 +1,7 @@
 import { existsSync, promises as fs, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ACCOUNT_LIMITS } from "./constants.js";
+import { parseIntegerEnv } from "./env-parsing.js";
 import { StorageError } from "./errors.js";
 import { withFileOperationRetry, withRetry } from "./fs-retry.js";
 import { createLogger } from "./logger.js";
@@ -179,6 +180,99 @@ const BACKUP_COPY_MAX_ATTEMPTS = 5;
 const BACKUP_COPY_BASE_DELAY_MS = 10;
 let storageBackupEnabled = true;
 let lastAccountsSaveTimestamp = 0;
+/**
+ * Default minimum age of the newest rotating `.bak` snapshot before a save
+ * pays for another full 3-slot rotation. Rotating backups are crash-recovery
+ * insurance, not a changelog: inside the window the primary-write path skips
+ * ~6 fs ops and ~2x payload bytes of staged copies per save. A credential
+ * change (account count or refresh-token set) still forces a fresh slot — a
+ * backup that predates an in-window rotation can only offer spent tokens — a
+ * missing `.bak` always rotates, and
+ * `CODEX_AUTH_STORAGE_BACKUP_MIN_INTERVAL_MS=0` restores the legacy
+ * rotate-on-every-save behavior.
+ */
+const ACCOUNTS_BACKUP_MIN_INTERVAL_DEFAULT_MS = 30_000;
+
+function backupRotationMinIntervalMs(): number {
+	const parsed = parseIntegerEnv(
+		process.env.CODEX_AUTH_STORAGE_BACKUP_MIN_INTERVAL_MS,
+	);
+	if (parsed === undefined) {
+		return ACCOUNTS_BACKUP_MIN_INTERVAL_DEFAULT_MS;
+	}
+	return Math.max(0, parsed);
+}
+
+/**
+ * Fingerprint of the primary accounts file as last seen by THIS process — a
+ * stat taken before a primary read (paired with the sha256 of the content
+ * actually parsed, when available), or the temp-file stat and content hash
+ * carried over our own atomic rename (recorded for free in `onSaved`).
+ * Compared against the live primary on baseline-less saves to spot a foreign
+ * write; keyed by path so a `setStoragePath*` switch can never borrow another
+ * file's history.
+ */
+type PrimaryFileFingerprint = {
+	mtimeMs?: number;
+	ctimeMs?: number;
+	size?: number;
+	ino?: number;
+	/** sha256 of the exact bytes read or written, when known. */
+	sha256?: string;
+};
+const lastKnownPrimaryState = new Map<string, PrimaryFileFingerprint>();
+const baselinelessSaveWarnedPaths = new Set<string>();
+
+function notePrimaryState(
+	path: string,
+	stats:
+		| { mtimeMs?: number; ctimeMs?: number; size?: number; ino?: number }
+		| undefined,
+	sha256?: string,
+): void {
+	if (!stats && sha256 === undefined) return;
+	const fingerprint: PrimaryFileFingerprint = { sha256 };
+	if (stats) {
+		if (Number.isFinite(stats.mtimeMs)) fingerprint.mtimeMs = stats.mtimeMs;
+		if (Number.isFinite(stats.ctimeMs)) fingerprint.ctimeMs = stats.ctimeMs;
+		if (Number.isFinite(stats.size)) fingerprint.size = stats.size;
+		// ino can exceed 2^53 on some filesystems; a lossy value would compare
+		// equal for two different files, so only record exact integers.
+		if (Number.isSafeInteger(stats.ino)) fingerprint.ino = stats.ino;
+	}
+	if (
+		fingerprint.mtimeMs === undefined &&
+		fingerprint.ctimeMs === undefined &&
+		fingerprint.size === undefined &&
+		fingerprint.ino === undefined &&
+		fingerprint.sha256 === undefined
+	) {
+		return;
+	}
+	lastKnownPrimaryState.set(path, fingerprint);
+}
+
+/**
+ * Metadata-only identity check, used when no content hash was recorded. A
+ * foreign write bumps ctime on POSIX even when the writer preserves mtime
+ * (utimes), and a rename-replacement changes ino — together they catch the
+ * equal-mtime collisions a mtime-only comparison missed.
+ */
+function primaryFingerprintMatches(
+	last: PrimaryFileFingerprint,
+	stats: { mtimeMs: number; ctimeMs: number; size: number; ino: number },
+): boolean {
+	return (
+		last.mtimeMs !== undefined &&
+		last.ctimeMs !== undefined &&
+		last.size !== undefined &&
+		last.ino !== undefined &&
+		last.mtimeMs === stats.mtimeMs &&
+		last.ctimeMs === stats.ctimeMs &&
+		last.size === stats.size &&
+		last.ino === stats.ino
+	);
+}
 
 type AnyAccountStorage = AccountStorageV1 | AccountStorageV3;
 
@@ -336,6 +430,218 @@ async function createRotatingAccountsBackup(path: string): Promise<void> {
 			}
 		}
 	}
+}
+
+/**
+ * Credential-relevant shape of an account list for the throttle trigger:
+ * entry count plus the set of refresh tokens. A write that changes either is
+ * the case where the pre-write state earns a fresh backup slot even inside
+ * the window — a rotated refresh token spends its predecessor upstream, so a
+ * backup that predates several in-window rotations can only offer spent
+ * credentials to recovery. Pure metadata churn (lastUsed, health fields)
+ * still skips.
+ */
+type AccountCredentialSignature = {
+	count: number;
+	refreshTokens: Set<string>;
+};
+
+function credentialSignatureOf(
+	accounts: readonly unknown[],
+): AccountCredentialSignature {
+	const refreshTokens = new Set<string>();
+	for (const account of accounts) {
+		if (
+			isRecord(account) &&
+			typeof account.refreshToken === "string" &&
+			account.refreshToken.length > 0
+		) {
+			refreshTokens.add(account.refreshToken);
+		}
+	}
+	return { count: accounts.length, refreshTokens };
+}
+
+function sameCredentialSignature(
+	a: AccountCredentialSignature,
+	b: AccountCredentialSignature,
+): boolean {
+	if (a.count !== b.count || a.refreshTokens.size !== b.refreshTokens.size) {
+		return false;
+	}
+	for (const token of a.refreshTokens) {
+		if (!b.refreshTokens.has(token)) return false;
+	}
+	return true;
+}
+
+/**
+ * Cheap credential-signature probe for the throttle trigger. Reads and parses
+ * only the top-level `accounts` shape — far cheaper than the staged copies a
+ * rotation costs, and it runs at most once per save inside the throttle
+ * window. Returns null when the signature cannot be determined so the caller
+ * rotates rather than skipping a snapshot it cannot rule out.
+ */
+async function readOnDiskCredentialSignature(
+	path: string,
+): Promise<AccountCredentialSignature | null> {
+	try {
+		const parsed: unknown = JSON.parse(await fs.readFile(path, "utf-8"));
+		if (isRecord(parsed) && Array.isArray(parsed.accounts)) {
+			return credentialSignatureOf(parsed.accounts);
+		}
+	} catch {
+		// Missing or unparsable primary: fall through to the null sentinel.
+	}
+	return null;
+}
+
+/**
+ * Refresh tokens still present in a recovery source: rotating and discovered
+ * `.bak*` snapshots plus any WAL journal payload. Pending rotated credentials
+ * whose spent token a restore could still resurface must survive pruning, so
+ * recovering a throttle-stale backup self-heals to the newest credential via
+ * `applyPendingAuth` instead of reviving a token that was spent upstream.
+ * Best-effort: unreadable or unparseable sources contribute nothing.
+ */
+async function collectRestorableRefreshTokens(path: string): Promise<string[]> {
+	const tokens: string[] = [];
+	const collectContent = (raw: string): void => {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			return;
+		}
+		if (!isRecord(parsed) || !Array.isArray(parsed.accounts)) return;
+		for (const account of parsed.accounts) {
+			if (
+				isRecord(account) &&
+				typeof account.refreshToken === "string" &&
+				account.refreshToken.length > 0
+			) {
+				tokens.push(account.refreshToken);
+			}
+		}
+	};
+	for (const candidate of await getAccountsBackupRecoveryCandidatesWithDiscovery(
+		path,
+	)) {
+		try {
+			collectContent(await fs.readFile(candidate, "utf-8"));
+		} catch {
+			// An unreadable candidate contributes nothing.
+		}
+	}
+	try {
+		const walEntry: unknown = JSON.parse(
+			await fs.readFile(getAccountsWalPath(path), "utf-8"),
+		);
+		if (isRecord(walEntry) && typeof walEntry.content === "string") {
+			collectContent(walEntry.content);
+		}
+	} catch {
+		// No usable WAL payload.
+	}
+	return tokens;
+}
+
+/**
+ * Gate around `createRotatingAccountsBackup` that throttles rotation churn.
+ * Rotates when the newest `.bak` is missing (always preserve at least one
+ * recovery snapshot), when it is older than `backupRotationMinIntervalMs()`,
+ * or when the incoming write changes the stored credential signature
+ * (account count or refresh-token set) — the case where the pre-write state
+ * is worth a fresh slot even inside the window.
+ * `expectedOnDiskAccounts` lets callers that already read the primary under
+ * the lock (the three-way merge path) skip the signature probe.
+ */
+async function rotateAccountsBackupIfDue(
+	path: string,
+	nextAccounts: readonly AccountMetadataV3[],
+	expectedOnDiskAccounts: readonly AccountMetadataV3[] | null | undefined,
+): Promise<void> {
+	const latestBackupPath = getAccountsBackupPath(path);
+	let newestBackupAgeMs: number | null = null;
+	try {
+		newestBackupAgeMs = Date.now() - (await fs.stat(latestBackupPath)).mtimeMs;
+	} catch {
+		// Missing or unreadable newest backup: rotate so >=1 snapshot exists.
+		newestBackupAgeMs = null;
+	}
+	const minIntervalMs = backupRotationMinIntervalMs();
+	// Age is clamped at 0: a backup whose mtime lands fractionally ahead of
+	// Date.now() (fs timestamp granularity vs. the clock) is "fresh", and the
+	// clamp also keeps `minIntervalMs = 0` meaning "always rotate".
+	if (newestBackupAgeMs !== null && Math.max(0, newestBackupAgeMs) < minIntervalMs) {
+		const onDiskSignature = expectedOnDiskAccounts !== undefined
+			? credentialSignatureOf(expectedOnDiskAccounts ?? [])
+			: await readOnDiskCredentialSignature(path);
+		if (
+			onDiskSignature !== null &&
+			sameCredentialSignature(
+				onDiskSignature,
+				credentialSignatureOf(nextAccounts),
+			)
+		) {
+			log.debug("Skipping account backup rotation inside throttle window", {
+				path,
+				backupPath: latestBackupPath,
+				newestBackupAgeMs,
+				minIntervalMs,
+			});
+			return;
+		}
+	}
+	await createRotatingAccountsBackup(path);
+}
+
+/**
+ * Warn (once per storage path per process) when a save without a merge
+ * baseline is about to overwrite a primary this process did not last read or
+ * write — the cheap signature of "concurrent modification, no baseline"
+ * (last-writer-wins). The WeakMap baseline in `saveAccounts` cannot attach to
+ * raw `structuredClone` copies, so this is the residual guard for untracked
+ * objects. First-ever saves (no primary), empty primaries, and files whose
+ * content (or full stat tuple, when no hash was recorded) matches our last
+ * read/write stay quiet; the write is never blocked.
+ */
+async function warnOnBaselinelessSave(path: string): Promise<void> {
+	if (baselinelessSaveWarnedPaths.has(path)) return;
+	// No primary on disk (or an unreadable one): nothing exists to silently
+	// lose, so the first-ever save stays quiet.
+	const stats = await fs.stat(path).catch(() => undefined);
+	if (!stats?.isFile() || stats.size === 0) return;
+	const last = lastKnownPrimaryState.get(path);
+	if (last !== undefined) {
+		if (last.sha256 !== undefined) {
+			// Content-exact check: identical bytes mean nothing was lost to a
+			// foreign write regardless of timestamp granularity or an mtime-
+			// preserving writer, and different bytes mean one landed even when
+			// every stat field coincidentally matches.
+			const currentSha256 = await fs
+				.readFile(path, "utf-8")
+				.then((raw) => computeSha256(raw))
+				.catch(() => undefined);
+			if (currentSha256 !== undefined) {
+				if (currentSha256 === last.sha256) return;
+			} else if (primaryFingerprintMatches(last, stats)) {
+				// Content unreadable mid-check: fall back to the metadata tuple.
+				return;
+			}
+		} else if (primaryFingerprintMatches(last, stats)) {
+			return;
+		}
+	}
+	baselinelessSaveWarnedPaths.add(path);
+	const message =
+		"Saving account storage without a merge baseline over a primary file this process did not last read or write; a concurrent writer's changes may be overwritten (last-writer-wins). Load via loadAccounts() or clone via cloneTrackedAccountStorage() so the three-way merge can run.";
+	log.warn("Baseline-less account save over externally modified primary", {
+		path,
+	});
+	process.emitWarning(message, {
+		code: "CODEX_MULTI_AUTH_BASELINELESS_SAVE",
+	});
 }
 
 function isRotatingBackupTempArtifact(
@@ -672,7 +978,17 @@ export async function restoreAccountsFromBackup(
 				normalizeAccountStorage,
 				isRecord,
 			}),
-		saveAccounts,
+		saveAccounts: async (storage) => {
+			// An explicit restore is a deliberate overwrite of the current
+			// primary, like the crash-recovery persists: record the file being
+			// replaced so the baseline-less-save guard neither misreports it as
+			// a foreign write nor spends the once-per-path warning on it.
+			notePrimaryState(
+				getStoragePath(),
+				await fs.stat(getStoragePath()).catch(() => undefined),
+			);
+			await saveAccounts(storage);
+		},
 	});
 }
 
@@ -736,8 +1052,19 @@ async function migrateLegacyProjectStorageIfNeeded(options?: {
 	}
 
 	const loadCurrentStorageForMigration =
-		async (): Promise<AccountStorageV3 | null> =>
-			loadNormalizedStorageFromPath(
+		async (): Promise<AccountStorageV3 | null> => {
+			// Stat before the read so a migration persist of the merged content
+			// counts as a state this process knows (baseline-less-save guard).
+			// Recorded even when the parse fails: a migration persist that
+			// replaces an unreadable current file is a deliberate overwrite, not
+			// a foreign modification to warn about.
+			let stats: Awaited<ReturnType<typeof fs.stat>> | undefined;
+			try {
+				stats = await fs.stat(currentStoragePath);
+			} catch {
+				stats = undefined;
+			}
+			const storage = await loadNormalizedStorageFromPath(
 				currentStoragePath,
 				"current account storage",
 				{
@@ -751,6 +1078,9 @@ async function migrateLegacyProjectStorageIfNeeded(options?: {
 					},
 				},
 			);
+			notePrimaryState(currentStoragePath, stats);
+			return storage;
+		};
 	const readLiveCurrentStorageIfExportMode = async (): Promise<{
 		exists: boolean;
 		storage: AccountStorageV3 | null;
@@ -2016,12 +2346,25 @@ async function loadAccountsInternal(
 		? await migrateLegacyProjectStorageIfNeeded({ persist: persistMigration })
 		: null;
 
+	// Stat BEFORE the primary read: this fingerprint is the state this process
+	// can claim to know. A writer racing the read makes the record stale, which
+	// is the safe direction for the baseline-less-save guard — never claim
+	// knowledge of content we may not have parsed.
+	let primaryStatsBeforeRead: Awaited<ReturnType<typeof fs.stat>> | undefined;
 	try {
-		const { normalized, storedVersion, schemaErrors } =
+		primaryStatsBeforeRead = await fs.stat(path);
+	} catch {
+		primaryStatsBeforeRead = undefined;
+	}
+	try {
+		const { normalized, storedVersion, schemaErrors, contentSha256 } =
 			await loadAccountsFromPath(path, {
 				normalizeAccountStorage,
 				isRecord,
 			});
+		if (normalized) {
+			notePrimaryState(path, primaryStatsBeforeRead, contentSha256);
+		}
 		if (schemaErrors.length > 0) {
 			log.warn("Account storage schema validation warnings", {
 				errors: schemaErrors.slice(0, 5),
@@ -2102,6 +2445,12 @@ async function loadAccountsInternal(
 
 		return normalized;
 	} catch (error) {
+		// The primary could not be parsed (or read). Whatever file we stat'd is
+		// the state the WAL/backup recovery persists below deliberately replace,
+		// so record it as known — otherwise those intentional recovery saves
+		// would emit the baseline-less-overwrite warning and spend the
+		// once-per-path guard meant for genuine foreign writes.
+		notePrimaryState(path, primaryStatsBeforeRead);
 		const code = (error as NodeJS.ErrnoException).code;
 		if (existsSync(resetMarkerPath)) {
 			return createEmptyStorageWithMetadata(false, "intentional-reset");
@@ -2225,15 +2574,26 @@ async function loadAccountsForExport(): Promise<AccountStorageV3 | null> {
 	}
 }
 
-async function saveAccountsUnlocked(storage: AccountStorageV3): Promise<void> {
-	await saveAccountsUnlockedToDisk(storage);
-	// A persisted (or superseded) pending rotated credential is no longer needed.
-	await prunePendingAuth(getStoragePath(), storage).catch((error) => {
+async function saveAccountsUnlocked(
+	storage: AccountStorageV3,
+	options?: { expectedOnDiskAccounts?: readonly AccountMetadataV3[] | null },
+): Promise<void> {
+	await saveAccountsUnlockedToDisk(storage, options);
+	// A persisted (or superseded) pending rotated credential is no longer needed —
+	// unless a restorable backup/WAL snapshot still carries the token it replaces,
+	// in which case the entry stays so a stale-backup recovery self-heals.
+	const path = getStoragePath();
+	await prunePendingAuth(path, storage, () =>
+		collectRestorableRefreshTokens(path),
+	).catch((error) => {
 		log.warn("Failed to prune pending rotated credentials", { code: typeof (error as NodeJS.ErrnoException).code === "string" && /^[A-Z_]{1,40}$/.test((error as NodeJS.ErrnoException).code ?? "") ? (error as NodeJS.ErrnoException).code : "INVALID_PENDING_AUTH" });
 	});
 }
 
-async function saveAccountsUnlockedToDisk(storage: AccountStorageV3): Promise<void> {
+async function saveAccountsUnlockedToDisk(
+	storage: AccountStorageV3,
+	options?: { expectedOnDiskAccounts?: readonly AccountMetadataV3[] | null },
+): Promise<void> {
 	const path = getStoragePath();
 	const resetMarkerPath = getIntentionalResetMarkerPath(path);
 	const walPath = getAccountsWalPath(path);
@@ -2279,7 +2639,12 @@ async function saveAccountsUnlockedToDisk(storage: AccountStorageV3): Promise<vo
 				path,
 				"Detected synthetic fixture-like account payload. Use explicit account import/login commands instead.",
 			),
-		createRotatingAccountsBackup,
+		createRotatingAccountsBackup: (targetPath) =>
+			rotateAccountsBackupIfDue(
+				targetPath,
+				storage.accounts,
+				options?.expectedOnDiskAccounts,
+			),
 		computeSha256,
 		writeJournal: async (content: string, journalPath: string) => {
 			const journalEntry: AccountsJournalEntry = {
@@ -2339,8 +2704,9 @@ async function saveAccountsUnlockedToDisk(storage: AccountStorageV3): Promise<vo
 				// Ignore cleanup failure.
 			}
 		},
-		onSaved: () => {
+		onSaved: (stats, contentSha256) => {
 			lastAccountsSaveTimestamp = Date.now();
+			notePrimaryState(path, stats, contentSha256);
 		},
 		logWarn: (message: string, details: Record<string, unknown>) => {
 			log.warn(message, details);
@@ -2449,13 +2815,17 @@ export async function withAccountAndFlaggedStorageTransaction<T>(
 			const baseline = loadedAccountSnapshots.get(accountStorage);
 			const nextAccounts = cloneAccountStorageForPersistence(baseline ? mergeAccountSnapshot(baseline, state.snapshot, accountStorage) : accountStorage);
 			const nextFlagged = cloneFlaggedStorageForPersistence(flaggedStorage);
-			await saveAccountsUnlocked(nextAccounts);
+			await saveAccountsUnlocked(nextAccounts, {
+				expectedOnDiskAccounts: state.snapshot?.accounts,
+			});
 			try {
 				await saveFlaggedAccountsUnlocked(nextFlagged);
 				state.snapshot = nextAccounts;
 			} catch (error) {
 				try {
-					await saveAccountsUnlocked(previousAccounts);
+					await saveAccountsUnlocked(previousAccounts, {
+						expectedOnDiskAccounts: state.snapshot?.accounts,
+					});
 					state.snapshot = previousAccounts;
 				} catch (rollbackError) {
 					const combinedError = new AggregateError(
@@ -2527,7 +2897,21 @@ export async function withFlaggedStorageTransaction<T>(
  * @param storage - Account storage data to save
  * @throws StorageError with platform-aware hints on failure
  */
-/** Clone a loaded working snapshot without losing its optimistic-concurrency baseline. */
+/**
+ * Clone a loaded working snapshot without losing its optimistic-concurrency baseline.
+ *
+ * Baseline contract: `saveAccounts` only runs the three-way merge
+ * (`mergeAccountSnapshot` against a fresh `loadPrimaryAccountsForMerge` read)
+ * when the saved object is registered in `loadedAccountSnapshots` — and that
+ * WeakMap is keyed by OBJECT IDENTITY, so registration does not survive
+ * `structuredClone`, `JSON.parse(JSON.stringify(...))`, spread copies, or
+ * manual reconstruction. A baseline-less save writes the object as-is
+ * (last-writer-wins): concurrent changes are neither merged nor flagged with
+ * ESTALE, and when the primary on disk differs from the state this process
+ * last read or wrote the save additionally emits a one-time baseline-less
+ * overwrite warning. Use this helper — or mutate the loaded object in place —
+ * to keep the merge armed.
+ */
 export function cloneTrackedAccountStorage(storage: AccountStorageV3): AccountStorageV3 {
  const clone = structuredClone(storage);
  const baseline = loadedAccountSnapshots.get(storage);
@@ -2541,8 +2925,16 @@ export async function saveAccounts(storage: AccountStorageV3): Promise<void> {
 		withStorageLock,
 		saveUnlocked: async proposed => {
 			const baseline = loadedAccountSnapshots.get(proposed);
-			const snapshot = baseline ? mergeAccountSnapshot(baseline, await loadPrimaryAccountsForMerge(), proposed) : proposed;
-			await saveAccountsUnlocked(snapshot);
+			const current = baseline ? await loadPrimaryAccountsForMerge() : null;
+			if (!baseline) {
+				// Without a baseline the three-way merge cannot run — this write is
+				// last-writer-wins. Warn (once) if the primary changed underneath us.
+				await warnOnBaselinelessSave(getStoragePath());
+			}
+			const snapshot = baseline ? mergeAccountSnapshot(baseline, current, proposed) : proposed;
+			await saveAccountsUnlocked(snapshot, {
+				expectedOnDiskAccounts: current?.accounts,
+			});
 			if (baseline) {
 				for (const key of Object.keys(proposed)) Reflect.deleteProperty(proposed, key);
 				Object.assign(proposed, structuredClone(snapshot));
