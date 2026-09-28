@@ -8,7 +8,7 @@ import { CodexUnavailableError, isCodexUnavailableError } from "./errors.js";
 import { getCodexInstructions } from "./prompts/codex.js";
 import { mutateRuntimeObservabilitySnapshot } from "./runtime/runtime-observability.js";
 import type { RequestBody } from "./types.js";
-import { isRecord } from "./utils.js";
+import { combineSignals, isRecord } from "./utils.js";
 import { FirstUseProbeError, finishSubscriptionFirstUse, needsSubscriptionFirstUse } from "./runtime/subscription-first-use.js";
 
 /**
@@ -431,7 +431,10 @@ export async function fetchCodexQuotaSnapshot(
 					method: "POST",
 					headers,
 					body: JSON.stringify(probeBody),
-					signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
+					// combineSignals wraps AbortSignal.any with null-tolerance:
+					// the composite detaches from a long-lived caller signal once
+					// this probe completes, instead of pinning a listener on it.
+					signal: options.signal ? combineSignals(controller.signal, options.signal) : controller.signal,
 				});
 			} finally {
 				clearTimeout(timeout);

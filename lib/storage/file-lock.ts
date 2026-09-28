@@ -12,6 +12,33 @@ const abandonedOwners = new Set<string>();
 const leases = new AsyncLocalStorage<Map<string, Lease>>();
 const host = createHash("sha256").update(hostname()).digest("hex").slice(0, 16);
 const ownerPattern = /^([a-f0-9]{16})\.([1-9][0-9]*)\.([a-f0-9-]{36})$/;
+// Contended acquisition retries once ran on a fixed 25ms delay: every waiter
+// woke on the same cadence and re-collided on the rename (p99 ~1.8s under ~200
+// waiters). The base delay now grows mildly from 15ms toward 40ms with up to
+// 10ms of uniform jitter, so each retry lands in ~[15,50)ms and waiters
+// decorrelate instead of stampeding the lock together.
+const LOCK_RETRY_MIN_DELAY_MS = 15;
+const LOCK_RETRY_MAX_BASE_DELAY_MS = 40;
+const LOCK_RETRY_GROWTH_FACTOR = 1.2;
+const LOCK_RETRY_JITTER_MS = 10;
+function lockRetryBaseDelayMs(failedAttempt: number): number {
+    return Math.min(LOCK_RETRY_MIN_DELAY_MS * LOCK_RETRY_GROWTH_FACTOR ** (failedAttempt - 1), LOCK_RETRY_MAX_BASE_DELAY_MS);
+}
+// Derive the attempt cap from the delay schedule itself, not a flat ~40ms
+// guess: the first retries are cheaper than steady state (15ms, 18ms, …), so
+// ceil(waitMs / expected) let a short budget expire after roughly half the
+// requested wait — a 70ms budget could return ELOCKED in ~33ms. Summing the
+// zero-jitter base delays keeps retrying until the schedule has slept at
+// least waitMs; jitter only ever extends the wait, never shortens it.
+function lockMaxAttemptsForWaitMs(waitMs: number): number {
+    let attempts = 1;
+    let coveredMs = 0;
+    while (coveredMs < waitMs) {
+        coveredMs += lockRetryBaseDelayMs(attempts);
+        attempts += 1;
+    }
+    return attempts;
+}
 function code(error: unknown): string | undefined {
     return (error as NodeJS.ErrnoException | undefined)?.code;
 }
@@ -146,7 +173,12 @@ export async function withFileTransactionLock<T>(path: string, action: () => Pro
                 await recoverDeadOwner(lock);
                 throw Object.assign(Error("Storage is busy with another live writer; retry shortly."), { code: "ELOCKED" });
             }
-        }, { maxAttempts: Math.max(1, Math.ceil((options.waitMs ?? 10000) / 25) + 1), backoffMs: 25, retryableCodes: ["ELOCKED", "EBUSY", "EPERM", "EACCES", "EAGAIN"] });
+        }, {
+            maxAttempts: lockMaxAttemptsForWaitMs(options.waitMs ?? 10000),
+            backoffMs: lockRetryBaseDelayMs,
+            jitterMs: LOCK_RETRY_JITTER_MS,
+            retryableCodes: ["ELOCKED", "EBUSY", "EPERM", "EACCES", "EAGAIN"],
+        });
         const lease = { active: true };
         const context = new Map(leases.getStore());
         context.set(key, lease);

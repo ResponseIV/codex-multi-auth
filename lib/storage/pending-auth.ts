@@ -85,13 +85,16 @@ export async function recordPendingAuth(
 		const entries = (await read(path)).filter(
 			(entry) => entry.prior !== prior && entry.prior !== hash(auth.refreshToken),
 		);
-		// Rotating a token that is itself only journaled: the row on disk still holds
-		// the original spent token, so extend that entry rather than add one that
-		// no disk row can match.
+		// Rotating a token that is itself only journaled: extend that entry to the
+		// newest credential, but ALSO keep an entry keyed by the token this
+		// rotation just spent. A backup slot or WAL can still hold that
+		// intermediate token, and pruning now keeps entries whose spent token any
+		// recovery source can surface — a stale-snapshot restore then self-heals
+		// straight to the newest credential instead of reviving a spent token.
 		const chained = entries.find((entry) => entry.refreshToken === auth.priorRefreshToken);
-		const current = chained ?? { prior, recordId: auth.recordId, refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at };
 		if (chained) Object.assign(chained, { recordId: chained.recordId ?? auth.recordId, refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at });
-		else entries.push(current);
+		const current: PendingAuth = { prior, recordId: auth.recordId, refreshToken: auth.refreshToken, accessToken: auth.accessToken, expiresAt: auth.expiresAt, at: auth.at };
+		entries.push(current);
 		const excess = entries.length - MAX_ENTRIES;
 		if (excess > 0) {
 			// Drop the oldest other entries, never the credential being recorded now.
@@ -139,13 +142,36 @@ export async function applyPendingAuth(
 	return storage;
 }
 
-/** After a save, drop entries whose spent token is no longer on disk (persisted or superseded). */
-export async function prunePendingAuth(storagePath: string, saved: AccountStorageV3): Promise<void> {
+/**
+ * After a save, drop entries whose spent token is no longer in any restorable
+ * state. `saved` is the primary content just persisted; callers may also
+ * supply `restorableRefreshTokens` — refresh tokens still present in recovery
+ * sources (rotating/discovered backups, a WAL payload) — since a restore can
+ * resurface a spent token, its entry must survive until no source holds it.
+ * A scan failure keeps every entry: retention is the safe direction.
+ */
+export async function prunePendingAuth(
+	storagePath: string,
+	saved: AccountStorageV3,
+	restorableRefreshTokens?: () => Promise<Iterable<string>>,
+): Promise<void> {
 	const path = getPendingAuthPath(storagePath);
 	const current = await read(path);
 	if (!current.length) return;
 	await withFileTransactionLock(path, async () => {
 		const spent = new Set(saved.accounts.map((account) => hash(account.refreshToken)));
+		if (restorableRefreshTokens) {
+			try {
+				for (const token of await restorableRefreshTokens()) {
+					spent.add(hash(token));
+				}
+			} catch (error) {
+				log.warn("Recovery-source scan failed; keeping all pending rotated credentials", {
+					code: typeof (error as NodeJS.ErrnoException).code === "string" && /^[A-Z_]{1,40}$/.test((error as NodeJS.ErrnoException).code ?? "") ? (error as NodeJS.ErrnoException).code : "UNKNOWN",
+				});
+				return;
+			}
+		}
 		const entries = await read(path);
 		const remaining = entries.filter((entry) => spent.has(entry.prior));
 		if (remaining.length !== entries.length) await write(path, remaining);

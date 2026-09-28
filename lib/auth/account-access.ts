@@ -1,6 +1,7 @@
 import { CODEX_BASE_URL } from "../constants.js";
 import type { CodexCliMirror, Workspace } from "../storage/public-types.js";
 import type { AccountIdSource } from "../types.js";
+import { combineSignals } from "../utils.js";
 
 /**
  * Which accounts the backend will actually let the current credentials act as.
@@ -83,8 +84,11 @@ export async function fetchAuthorizedAccounts(
 
 	const doFetch = options.fetch ?? globalThis.fetch;
 	const timeout = AbortSignal.timeout(ACCOUNTS_CHECK_TIMEOUT_MS);
+	// combineSignals wraps AbortSignal.any (available since Node 18.17, the
+	// engines floor) with null-tolerance; the native composite also detaches
+	// from a long-lived caller signal once this request completes.
 	const signal = options.signal
-		? AbortSignal.any([options.signal, timeout])
+		? combineSignals(options.signal, timeout)
 		: timeout;
 
 	try {

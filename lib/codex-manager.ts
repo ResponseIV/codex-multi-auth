@@ -16,7 +16,6 @@ import {
 	reboundUnauthorizedAccountIdentity,
 	refreshCodexCliMirror,
 } from "./auth/account-access.js";
-import { codexCliAccountIdFor } from "./auth/token-utils.js";
 import { loadCodexCliState } from "./codex-cli/state.js";
 import { setCodexCliActiveSelection } from "./codex-cli/writer.js";
 import {
@@ -146,10 +145,8 @@ import {
 } from "./quota-probe.js";
 import { queuedRefresh } from "./refresh-queue.js";
 import {
-	type AccountMetadataV3,
 	type AccountStorageV3,
 	clearAccounts,
-	findMatchingAccountIndex,
 	inspectStorageHealth,
 	getLastAccountsSaveTimestamp,
 	getStoragePath,
@@ -157,7 +154,6 @@ import {
 	loadFlaggedAccounts,
 	saveAccounts,
 	setStoragePath,
-	withAccountStorageTransaction,
 } from "./storage.js";
 
 // Formatter implementations moved to lib/codex-manager/formatters/ (audit
@@ -305,112 +301,10 @@ async function runBest(args: string[]): Promise<number> {
 	});
 }
 
-export async function autoSyncActiveAccountToCodex(): Promise<boolean> {
-	setStoragePath(null);
-	const storage = await loadAccounts();
-	if (!storage || storage.accounts.length === 0) {
-		return false;
-	}
-
-	const activeIndex = resolveActiveIndex(storage, "codex");
-	if (activeIndex < 0 || activeIndex >= storage.accounts.length) {
-		return false;
-	}
-
-	const account = storage.accounts[activeIndex];
-	if (!account) {
-		return false;
-	}
-	const accountMatch = {
-		accountId: account.accountId,
-		email: account.email,
-		refreshToken: account.refreshToken,
-	};
-
-	const now = Date.now();
-	let syncAccessToken = account.accessToken;
-	let syncRefreshToken = account.refreshToken;
-	let syncExpiresAt = account.expiresAt;
-	let syncIdToken: string | undefined;
-	let syncEmail = account.email;
-	let changed = false;
-	let nextStoredAccount: AccountMetadataV3 | null = null;
-
-	if (!hasUsableAccessToken(account, now)) {
-		const refreshResult = await queuedRefresh(account.refreshToken);
-		if (refreshResult.type !== "success") {
-			return false;
-		}
-		nextStoredAccount = structuredClone(account);
-		const tokenAccountId = extractAccountId(refreshResult.access);
-		const nextEmail = sanitizeEmail(
-			extractAccountEmail(refreshResult.access, refreshResult.idToken),
-		);
-		if (nextStoredAccount.refreshToken !== refreshResult.refresh) {
-			nextStoredAccount.refreshToken = refreshResult.refresh;
-			changed = true;
-		}
-		if (nextStoredAccount.accessToken !== refreshResult.access) {
-			nextStoredAccount.accessToken = refreshResult.access;
-			changed = true;
-		}
-		if (nextStoredAccount.expiresAt !== refreshResult.expires) {
-			nextStoredAccount.expiresAt = refreshResult.expires;
-			changed = true;
-		}
-		if (nextEmail && nextEmail !== nextStoredAccount.email) {
-			nextStoredAccount.email = nextEmail;
-			changed = true;
-		}
-		if (applyTokenAccountIdentity(nextStoredAccount, tokenAccountId)) {
-			changed = true;
-		}
-		syncAccessToken = refreshResult.access;
-		syncRefreshToken = refreshResult.refresh;
-		syncExpiresAt = refreshResult.expires;
-		syncIdToken = refreshResult.idToken;
-		syncEmail = nextStoredAccount.email;
-	}
-
-	if (changed && nextStoredAccount) {
-		let persisted = false;
-		await withAccountStorageTransaction(async (loadedStorage, persist) => {
-			if (!loadedStorage) {
-				return;
-			}
-			const nextStorage = structuredClone(loadedStorage);
-			const targetIndex =
-				findMatchingAccountIndex(nextStorage.accounts, accountMatch, {
-					allowUniqueAccountIdFallbackWithoutEmail: true,
-				}) ??
-				findMatchingAccountIndex(nextStorage.accounts, nextStoredAccount, {
-					allowUniqueAccountIdFallbackWithoutEmail: true,
-				});
-			if (targetIndex === undefined) {
-				return;
-			}
-			nextStorage.accounts[targetIndex] = structuredClone(nextStoredAccount);
-			await persist(nextStorage);
-			persisted = true;
-		});
-		if (!persisted) {
-			return false;
-		}
-	}
-
-	return setCodexCliActiveSelection({
-		accountId: codexCliAccountIdFor(
-			nextStoredAccount ?? account,
-			syncAccessToken,
-			syncIdToken,
-		),
-		email: syncEmail,
-		accessToken: syncAccessToken,
-		refreshToken: syncRefreshToken,
-		expiresAt: syncExpiresAt,
-		...(syncIdToken ? { idToken: syncIdToken } : {}),
-	});
-}
+// Moved to lib/codex-manager/active-account-sync.ts so the wrapper's forwarded
+// path can import the sync without the whole manager/dispatch graph. Re-exported
+// here to keep the codex-manager.js surface (and its tests) unchanged.
+export { autoSyncActiveAccountToCodex } from "./codex-manager/active-account-sync.js";
 /** @internal Exposed for diagnostics regression tests; not part of the CLI API. */
 export function buildSelectAccountTraced(): (
 	storage: AccountStorageV3,
