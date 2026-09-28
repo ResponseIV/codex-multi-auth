@@ -73,6 +73,39 @@ describe("routing profiles", () => {
 		});
 	});
 
+	it("re-applies update mutations over the freshest profile store", async () => {
+		const {
+			createDefaultRoutingProfile,
+			loadRoutingProfileStore,
+			resolveProjectRoutingProfile,
+			updateRoutingProfileStore,
+			upsertRoutingProfile,
+		} = await import("../lib/routing-profiles.js");
+		const { projectKey, identityRoot } =
+			await resolveProjectRoutingProfile(projectDir);
+		await updateRoutingProfileStore((store) => ({
+			result: upsertRoutingProfile(
+				store,
+				createDefaultRoutingProfile({
+					projectKey: projectKey!,
+					projectName: "project",
+					identityRoot: identityRoot!,
+					now: 100,
+				}),
+				(next) => {
+					next.preferredTags.push("team");
+				},
+				100,
+			),
+			dirty: true,
+		}));
+		const loaded = await loadRoutingProfileStore();
+		expect(loaded.profiles[projectKey!]).toMatchObject({
+			preferredTags: ["team"],
+			updatedAt: 100,
+		});
+	});
+
 	it("returns null profile when no profile is stored for the project", async () => {
 		const { resolveProjectRoutingProfile } = await import(
 			"../lib/routing-profiles.js"
