@@ -7,10 +7,17 @@ This repository's current stable release line is `2.x`. Full release notes live 
 
 ## [2.17.2] - 2026-09-28
 
+Version resync over 2.17.1 — no functional changes. 2.17.1 was prepared but
+never published; the fixes below shipped in the published 2.17.2 artifact.
+This release re-aligns the package version, changelog, and release-notes
+filenames. [Full notes](docs/releases/v2.17.2.md).
+
+## [2.17.1] - 2026-09-28
+
 Automatic subscription priming observes each selected workspace on its own
 record, shared-organization accounts no longer share one quota entry, and
 concurrent quota writes merge instead of clobbering. App-bind cleanup now
-works on non-English POSIX systems. [Full notes](docs/releases/v2.17.2.md).
+works on non-English POSIX systems. [Full notes](docs/releases/v2.17.1.md).
 
 ### Fixed
 
