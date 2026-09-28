@@ -699,13 +699,25 @@ export interface FastSessionInputTrimPlan {
 	};
 }
 
+// `[^\S\n]` is every whitespace except newline: `\s` between the anchor and the
+// marker could span blank lines, and on whitespace-heavy multi-MB payloads the
+// `^|\n` + `\s*` combination backtracked per position (a >20s stall observed on
+// an all-whitespace body). Confining the run to a single line keeps the scan
+// linear while matching the same "line starts with a list marker" shapes.
+const MARKDOWN_LIST_ITEM_PATTERN =
+	/(^|\n)[^\S\n]*(?:[-*]|\d+\.)[^\S\n]+\S/;
+
+function hasMarkdownListItem(text: string): boolean {
+	return MARKDOWN_LIST_ITEM_PATTERN.test(text);
+}
+
 function isTrivialLatestPrompt(text: string): boolean {
 	const normalized = text.trim();
 	if (!normalized) return false;
 	if (normalized.length > 220) return false;
 	if (normalized.includes("\n")) return false;
 	if (normalized.includes("```")) return false;
-	if (/(^|\n)\s*(?:[-*]|\d+\.)\s+\S/m.test(normalized)) return false;
+	if (hasMarkdownListItem(normalized)) return false;
 	if (/https?:\/\//i.test(normalized)) return false;
 	if (/\|.+\|/.test(normalized)) return false;
 
@@ -719,7 +731,7 @@ function isStructurallyComplexPrompt(text: string): boolean {
 
 	const lineCount = normalized.split(/\r?\n/).filter(Boolean).length;
 	if (lineCount >= 3) return true;
-	if (/(^|\n)\s*(?:[-*]|\d+\.)\s+\S/m.test(normalized)) return true;
+	if (hasMarkdownListItem(normalized)) return true;
 	if (/\|.+\|/.test(normalized)) return true;
 	return false;
 }
