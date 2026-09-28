@@ -8090,11 +8090,11 @@ describe("codex bin wrapper", () => {
 	it("syncs manager active selection before and after forwarded commands", () => {
 		const fixtureRoot = createWrapperFixture();
 		const fakeBin = createFakeCodexBin(fixtureRoot);
-		const distLibDir = join(fixtureRoot, "dist", "lib");
+		const distLibDir = join(fixtureRoot, "dist", "lib", "codex-manager");
 		const markerPath = join(fixtureRoot, "sync-marker.txt");
 		mkdirSync(distLibDir, { recursive: true });
 		writeFileSync(
-			join(distLibDir, "codex-manager.js"),
+			join(distLibDir, "active-account-sync.js"),
 			[
 				'import { appendFileSync } from "node:fs";',
 				"export async function autoSyncActiveAccountToCodex() {",
