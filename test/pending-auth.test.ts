@@ -173,3 +173,41 @@ it("saves recovered legacy credentials without changing the original record iden
     expect(saved?.accounts).toHaveLength(2);
     expect(saved?.accounts[0]).toMatchObject({ recordId: originalId, refreshToken: "rotated" });
 });
+
+it("keeps an entry while a recovery source still holds its spent token, then prunes it", async () => {
+	const { createHash } = await import("node:crypto");
+	const sha = (token: string) => createHash("sha256").update(token).digest("hex");
+	await recordPendingAuth(storagePath, rotation("spent-a", "new-a"));
+	const saved = { version: 3 as const, activeIndex: 0, accounts: [{ refreshToken: "new-a", addedAt: 1, lastUsed: 1 }] };
+	// A backup slot still holding the spent token keeps the entry.
+	await prunePendingAuth(storagePath, saved, async () => ["spent-a"]);
+	const kept = JSON.parse(await fs.readFile(getPendingAuthPath(storagePath), "utf8")) as { entries: { prior: string }[] };
+	expect(kept.entries.some((entry) => entry.prior === sha("spent-a"))).toBe(true);
+	// Once no source can surface it, the entry (and the file) goes away.
+	await prunePendingAuth(storagePath, saved, async () => []);
+	await expect(fs.stat(getPendingAuthPath(storagePath))).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+it("keeps every entry when the recovery-source scan fails", async () => {
+	const { createHash } = await import("node:crypto");
+	const sha = (token: string) => createHash("sha256").update(token).digest("hex");
+	await recordPendingAuth(storagePath, rotation("spent-a", "new-a"));
+	const saved = { version: 3 as const, activeIndex: 0, accounts: [{ refreshToken: "new-a", addedAt: 1, lastUsed: 1 }] };
+	await prunePendingAuth(storagePath, saved, async () => { throw new Error("scan failed"); });
+	expect(logs.warn).toHaveBeenCalled();
+	const kept = JSON.parse(await fs.readFile(getPendingAuthPath(storagePath), "utf8")) as { entries: { prior: string }[] };
+	expect(kept.entries.some((entry) => entry.prior === sha("spent-a"))).toBe(true);
+});
+
+it("covers an intermediate spent token when rotations chain", async () => {
+	// a -> b -> c with only journaled state: a restore can resurface either
+	// spent token, so BOTH must map to the newest credential.
+	await recordPendingAuth(storagePath, rotation("a", "b"));
+	await recordPendingAuth(storagePath, rotation("b", "c"));
+	const pool = (token: string) => ({ version: 3 as const, activeIndex: 0, accounts: [{ refreshToken: token, addedAt: 1, lastUsed: 1 }] });
+	expect((await applyPendingAuth(storagePath, pool("a")))?.accounts[0]?.refreshToken).toBe("c");
+	expect((await applyPendingAuth(storagePath, pool("b")))?.accounts[0]?.refreshToken).toBe("c");
+	// And the chain still collapses to at most two entries — not one per hop.
+	const { entries } = JSON.parse(await fs.readFile(getPendingAuthPath(storagePath), "utf8")) as { entries: unknown[] };
+	expect(entries).toHaveLength(2);
+});

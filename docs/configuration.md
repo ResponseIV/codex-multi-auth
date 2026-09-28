@@ -116,7 +116,7 @@ The complete `pluginConfig` ↔ env accessor matrix is in [development/CONFIG_FI
 | `CODEX_AUTH_LIVE_ACCOUNT_SYNC*` / `CODEX_AUTH_SESSION_AFFINITY*` | Live sync and sticky sessions |
 | `CODEX_AUTH_RESPONSE_CONTINUATION` / `CODEX_AUTH_PROACTIVE_GUARDIAN*` / `CODEX_AUTH_PREEMPTIVE_QUOTA_*` | Continuation, guardian, quota deferral |
 | `CODEX_AUTH_NETWORK_ERROR_COOLDOWN_MS` / `CODEX_AUTH_SERVER_ERROR_COOLDOWN_MS` | Failure cooldowns |
-| `CODEX_AUTH_STORAGE_BACKUP_ENABLED` / `CODEX_AUTH_TOAST_DURATION_MS` | Storage backups and toast duration |
+| `CODEX_AUTH_STORAGE_BACKUP_ENABLED` / `CODEX_AUTH_STORAGE_BACKUP_MIN_INTERVAL_MS` / `CODEX_AUTH_TOAST_DURATION_MS` | Storage backups and toast duration |
 | `CODEX_AUTH_PID_OFFSET_ENABLED` / `CODEX_AUTH_ROUTING_MUTEX` / `CODEX_AUTH_BACKGROUND_RESPONSES` | Swarm bias, selection mutex, background Responses |
 | `CODEX_CLI_ACCOUNTS_PATH` / `CODEX_CLI_AUTH_PATH` | Override official Codex account/auth file paths |
 | `CODEX_AUTH_REFRESH_LEASE*` | Cross-process refresh lease directory/TTL/wait/poll knobs |
