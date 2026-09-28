@@ -20,8 +20,8 @@ import {
 } from "node:fs";
 import { rm as rmAsync } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { homedir, tmpdir } from "node:os";
-import { basename, delimiter, dirname, join, resolve as resolvePath, sep } from "node:path";
+import { constants as osConstants, homedir, tmpdir } from "node:os";
+import { basename, delimiter, dirname, isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -66,6 +66,11 @@ const SHADOW_HOME_STATE_FILE_SET = new Set(SHADOW_HOME_STATE_FILES);
 const SHADOW_HOME_CONFIG_FILE = "config.toml";
 const SHADOW_HOME_SYNC_LOCK_DIR = ".codex-multi-auth-shadow-sync.lock";
 const SHADOW_HOME_SYNC_STATE_FILE = ".codex-multi-auth-shadow-sync-state.json";
+// Housekeeping marker written into every shadow home ({pid, createdAt, and the
+// forwarded child's pid once spawned}) so the next launch can tell a dead
+// owner's leftover from a home still in use. It is never mirrored in from the
+// real home nor synced back into it.
+const SHADOW_HOME_OWNER_FILE = ".codex-multi-auth-owner.json";
 const APP_SERVER_ACCOUNT_DISPLAY_NAME = "codex-multi-auth";
 const RUNTIME_CONSTANTS = await loadRuntimeConstants();
 const RUNTIME_ROTATION_PROXY_PROVIDER_ID =
@@ -1830,11 +1835,23 @@ function forwardToRealCodexOnce(
 			? createAppServerAccountReadProtocolProxy()
 			: null;
 		let cleanupProtocolProxy = () => {};
+		let detachSignalRelay = () => {};
+		let signalForceTimer = null;
+		// Set the moment finalization begins so a repeated signal during cleanup
+		// can exit with the result already decided instead of the default
+		// disposition, which would look like a signal death and truncate
+		// shadow-home sync-back mid-write.
+		let finalizedExitCode = null;
 		const finalize = async (exitCode) => {
 			if (settled) {
 				return;
 			}
 			settled = true;
+			finalizedExitCode = exitCode;
+			if (signalForceTimer !== null) {
+				clearTimeout(signalForceTimer);
+				signalForceTimer = null;
+			}
 			cleanupProtocolProxy();
 			protocolProxy?.flushOutput();
 			try {
@@ -1842,6 +1859,11 @@ function forwardToRealCodexOnce(
 			} catch {
 				// Best-effort cleanup only.
 			}
+			// The relay stays installed until cleanup has run: a repeated signal
+			// landing mid-finalize exits with the decided code (see
+			// onRelayedSignal) rather than a default kill that truncates
+			// shadow-home sync-back.
+			detachSignalRelay();
 			if (captureOutput && stdout.length > 0) {
 				const filteredStdout = filterKnownForwardedCodexStderr(stdout);
 				if (filteredStdout.length > 0) {
@@ -1890,6 +1912,68 @@ function forwardToRealCodexOnce(
 			failLaunch(error);
 			return;
 		}
+
+		// The forwarded child can outlive this wrapper — SIGKILL can neither be
+		// caught nor relayed — so the shadow-home owner marker names the child
+		// too; otherwise the next launch's sweep would see only the dead wrapper
+		// PID and reap a home a live child is still writing to.
+		recordShadowHomeChildPid(env.CODEX_HOME, child?.pid);
+
+		// Relay terminal signals to the forwarded child. Without this the child
+		// outlives the wrapper whenever a signal targets the wrapper PID
+		// directly (kill, launcher, monitor) rather than the process group, and
+		// the shadow-home cleanup inside finalize never runs.
+		const signalRelayHandlers = new Map();
+		// The first relayed signal decides the exit result: once the force-kill
+		// fallback SIGKILLs the child, its `close` event reports SIGKILL, which
+		// would mask the SIGTERM the caller actually sent (137 instead of 143).
+		let relayedSignal = null;
+		const onRelayedSignal = (signal) => {
+			if (settled) {
+				// Finalization is already running. A repeated signal here is the
+				// caller escalating (Ctrl-C again, a monitor's follow-up TERM):
+				// exit with the result finalization produced rather than hang on
+				// a slow cleanup — but never with signal-death semantics, which
+				// is what the pre-handler default would have reported.
+				process.exit(finalizedExitCode ?? 1);
+			}
+			relayedSignal ??= signal;
+			try {
+				child?.kill(signal);
+			} catch {
+				// Best-effort forward only.
+			}
+			if (signalForceTimer !== null) {
+				return;
+			}
+			// If the child ignores the signal, force-kill it — but leave
+			// finalization to the child's "close" event, so shadow-home sync and
+			// removal run only after the child is reaped and its stdio drained.
+			signalForceTimer = setTimeout(() => {
+				signalForceTimer = null;
+				try {
+					child?.kill("SIGKILL");
+				} catch {
+					// Best-effort only.
+				}
+			}, 1_000);
+			signalForceTimer.unref?.();
+		};
+		// `on`, not `once`: the handlers stay installed until finalization, so a
+		// repeated signal while a child still ignores the first keeps relaying
+		// instead of falling back to the default disposition — which would kill
+		// the wrapper before it can reap the child or clean the shadow home.
+		for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+			const handler = () => onRelayedSignal(signal);
+			signalRelayHandlers.set(signal, handler);
+			process.on(signal, handler);
+		}
+		detachSignalRelay = () => {
+			for (const [signal, handler] of signalRelayHandlers) {
+				process.removeListener(signal, handler);
+			}
+			signalRelayHandlers.clear();
+		};
 
 		if (proxyAppServerAccountRead && protocolProxy) {
 			let stdinClosed = false;
@@ -1961,9 +2045,16 @@ function forwardToRealCodexOnce(
 		});
 
 		child.once("close", (code, signal) => {
-			if (signal) {
-				const signalNumber = signal === "SIGINT" ? 130 : 1;
-				finalize(signalNumber);
+			const reportedSignal = relayedSignal ?? signal;
+			if (reportedSignal) {
+				const signalNumber = osConstants.signals?.[reportedSignal];
+				finalize(
+					typeof signalNumber === "number"
+						? 128 + signalNumber
+						: reportedSignal === "SIGINT"
+							? 130
+							: 1,
+				);
 				return;
 			}
 			finalize(typeof code === "number" ? code : 1);
@@ -1972,6 +2063,7 @@ function forwardToRealCodexOnce(
 }
 
 async function forwardToRealCodex(codexBin, rawArgs, baseEnv = process.env) {
+	sweepStaleShadowHomes(baseEnv);
 	let currentArgs = [...rawArgs];
 	let lastExitCode = 1;
 	const attemptedModels = new Set();
@@ -3284,6 +3376,7 @@ function collectShadowHomeSyncFileNames(shadowCodexHome, syncFileNames) {
 			if (
 				name === SHADOW_HOME_CONFIG_FILE ||
 				name === SHADOW_HOME_SYNC_STATE_FILE ||
+				name === SHADOW_HOME_OWNER_FILE ||
 				syncFileNames.has(name)
 			) {
 				continue;
@@ -3455,6 +3548,7 @@ function createShadowHomeMirror(
 				name === SHADOW_HOME_CONFIG_FILE ||
 				name === SHADOW_HOME_SYNC_STATE_FILE ||
 				name === SHADOW_HOME_SYNC_LOCK_DIR ||
+				name === SHADOW_HOME_OWNER_FILE ||
 				skipMirrorPredicate(name)
 			) {
 				continue;
@@ -3684,6 +3778,175 @@ function resolveRuntimeRotationProxyOriginalCodexHome(baseEnv) {
 	return override || resolveCodexHomeDir(baseEnv);
 }
 
+// Markerless dirs are pre-sweeper leftovers (or crashed-before-mark runs);
+// 24h is generous next to any real session so a live shadow is never reaped.
+const STALE_SHADOW_HOME_AGE_MS = 24 * 60 * 60 * 1000;
+// A recorded PID is an identity, not just a liveness token: the owning process
+// necessarily started before its marker was written, so a process now holding
+// the PID that started meaningfully later is a different process — the PID was
+// recycled. Same rule sweepStaleRuntimeRotationAppHelperMetadata uses.
+const SHADOW_HOME_OWNER_SKEW_MS = 60_000;
+let staleShadowHomeSweepDone = false;
+
+function writeShadowHomeOwnerMarker(shadowDir) {
+	try {
+		writeFileSync(
+			join(shadowDir, SHADOW_HOME_OWNER_FILE),
+			JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+			{ mode: 0o600 },
+		);
+	} catch {
+		// Best-effort only; a missing marker just defers reaping to the age rule.
+	}
+}
+
+// Once the forwarded child exists it is recorded alongside the wrapper PID: a
+// wrapper that dies ungracefully (SIGKILL cannot be relayed) leaves a marker
+// whose wrapper PID is dead while the child may still be running against the
+// shadow home. Only markers this process wrote are updated — a foreign or
+// leaked marker is left for the sweep's own rules.
+function recordShadowHomeChildPid(shadowDir, childPid) {
+	if (typeof shadowDir !== "string" || shadowDir.trim().length === 0) {
+		return;
+	}
+	if (typeof childPid !== "number" || !Number.isFinite(childPid)) {
+		return;
+	}
+	try {
+		const ownerPath = join(shadowDir, SHADOW_HOME_OWNER_FILE);
+		if (!existsSync(ownerPath)) {
+			return;
+		}
+		const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+		if (owner?.pid !== process.pid) {
+			return;
+		}
+		writeFileSync(
+			ownerPath,
+			JSON.stringify({
+				...owner,
+				childPid,
+				childRecordedAt: Date.now(),
+			}),
+			{ mode: 0o600 },
+		);
+	} catch {
+		// Best-effort only; a missing child record just shortens retention.
+	}
+}
+
+function isShadowHomeStale(shadowDir, probeStartTime) {
+	const ownerPath = join(shadowDir, SHADOW_HOME_OWNER_FILE);
+	if (existsSync(ownerPath)) {
+		try {
+			const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+			if (typeof owner?.pid === "number" && Number.isFinite(owner.pid)) {
+				const recordedProcessAlive = (pid, recordedAt) => {
+					if (typeof pid !== "number" || !Number.isFinite(pid)) {
+						return false;
+					}
+					if (!isProcessAlive(pid)) {
+						return false;
+					}
+					if (
+						typeof recordedAt !== "number" ||
+						!Number.isFinite(recordedAt)
+					) {
+						// No marker timestamp to check identity against — bare liveness.
+						return true;
+					}
+					const actualStartTimeMs = probeStartTime(pid);
+					if (actualStartTimeMs === null || actualStartTimeMs === undefined) {
+						// Identity unknowable (Windows, no ps, probe budget spent) —
+						// retaining a maybe-live home beats reaping a live one.
+						return true;
+					}
+					return actualStartTimeMs <= recordedAt + SHADOW_HOME_OWNER_SKEW_MS;
+				};
+				if (recordedProcessAlive(owner.pid, owner.createdAt)) {
+					return false;
+				}
+				// The wrapper that owned this home is gone, but a killed wrapper
+				// can leave its forwarded child running against the shadow home;
+				// the home is only orphaned once the child is gone too.
+				if (
+					recordedProcessAlive(
+						owner.childPid,
+						owner.childRecordedAt ?? owner.createdAt,
+					)
+				) {
+					return false;
+				}
+				return true;
+			}
+		} catch {
+			// Corrupt marker — fall through to the age rule.
+		}
+	}
+	try {
+		return Date.now() - statSync(shadowDir).mtimeMs > STALE_SHADOW_HOME_AGE_MS;
+	} catch {
+		return false;
+	}
+}
+
+function sweepStaleShadowHomes(baseEnv) {
+	if (staleShadowHomeSweepDone) {
+		return;
+	}
+	staleShadowHomeSweepDone = true;
+	const candidates = [
+		{
+			root: join(
+				resolveCodexHomeDir(baseEnv),
+				"multi-auth",
+				"runtime-shadow-homes",
+			),
+			prefix: "codex-multi-auth-runtime-home-",
+		},
+		{ root: tmpdir(), prefix: "codex-multi-auth-home-" },
+	];
+	// Identity probes are memoized per PID and bounded: at most a handful of
+	// `ps` spawns run per launch, and only for markers whose PID is still live —
+	// dead-PID markers, the common case after a crash, never probe at all.
+	const probedStartTimes = new Map();
+	let probeBudget = 20;
+	const probeStartTime = (pid) => {
+		if (probedStartTimes.has(pid)) {
+			return probedStartTimes.get(pid);
+		}
+		if (probeBudget <= 0) {
+			return undefined;
+		}
+		probeBudget -= 1;
+		const startTime = readProcessStartTimeMs(pid);
+		probedStartTimes.set(pid, startTime);
+		return startTime;
+	};
+	for (const { root, prefix } of candidates) {
+		let entries;
+		try {
+			entries = readdirSync(root, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !entry.name.startsWith(prefix)) {
+				continue;
+			}
+			const shadowDir = join(root, entry.name);
+			if (!isShadowHomeStale(shadowDir, probeStartTime)) {
+				continue;
+			}
+			try {
+				removeDirectoryWithRetry(shadowDir);
+			} catch {
+				// Best-effort sweep; a busy shadow is retried on the next launch.
+			}
+		}
+	}
+}
+
 function createRuntimeRotationShadowHome(originalCodexHome) {
 	const shadowRoot = join(
 		originalCodexHome,
@@ -3691,7 +3954,11 @@ function createRuntimeRotationShadowHome(originalCodexHome) {
 		"runtime-shadow-homes",
 	);
 	mkdirSync(shadowRoot, { recursive: true });
-	return mkdtempSync(join(shadowRoot, "codex-multi-auth-runtime-home-"));
+	const shadowDir = mkdtempSync(
+		join(shadowRoot, "codex-multi-auth-runtime-home-"),
+	);
+	writeShadowHomeOwnerMarker(shadowDir);
+	return shadowDir;
 }
 
 function parseHookStateTableKey(line) {
@@ -5940,6 +6207,7 @@ function createCompatibilityCodexHome(
 	}
 
 	const shadowCodexHome = mkdtempSync(join(tmpdir(), "codex-multi-auth-home-"));
+	writeShadowHomeOwnerMarker(shadowCodexHome);
 	let syncShadowHomeStateBack = () => {};
 	const cleanup = () => {
 		try {
