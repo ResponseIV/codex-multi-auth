@@ -25,7 +25,7 @@ import {
 	resolve,
 } from "node:path";
 import process from "node:process";
-import { withDeadPid, withDeadPids } from "./helpers/owned-pids.js";
+import { withDeadPid, withDeadPids, withLivePid } from "./helpers/owned-pids.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -5985,6 +5985,57 @@ describe("codex bin wrapper", () => {
 		).toEqual([]);
 	});
 
+	it("never syncs the shadow-home owner marker into the real CODEX_HOME", () => {
+		const fixtureRoot = createWrapperFixture();
+		const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+			"#!/usr/bin/env node",
+			'const fs = require("node:fs");',
+			'const path = require("node:path");',
+			'const home = process.env.CODEX_HOME ?? "";',
+			// Prove the marker really sat inside the shadow during the run —
+			// otherwise the absence assertion below cannot regress.
+			'console.log(`OWNER_MARKER:${fs.existsSync(path.join(home, ".codex-multi-auth-owner.json"))}`);',
+			'console.log(`HOME_NAME:${path.basename(home)}`);',
+			"process.exit(0);",
+		]);
+		const originalHome = join(fixtureRoot, "codex-home");
+		const controlledTmp = join(fixtureRoot, "tmp");
+		mkdirSync(originalHome, { recursive: true });
+		mkdirSync(controlledTmp, { recursive: true });
+		writeFileSync(
+			join(originalHome, "config.toml"),
+			'model_reasoning_effort = "max"\n',
+			"utf8",
+		);
+
+		const result = runWrapper(
+			fixtureRoot,
+			["exec", "status", "--model", "gpt-5.5"],
+			{
+				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+				CODEX_HOME: originalHome,
+				TMP: controlledTmp,
+				TEMP: controlledTmp,
+				TMPDIR: controlledTmp,
+			},
+		);
+
+		expect(result.status).toBe(0);
+		const output = combinedOutput(result);
+		expect(output).toContain("OWNER_MARKER:true");
+		expect(output).toContain("HOME_NAME:codex-multi-auth-home-");
+		// The marker is sweep housekeeping for the shadow dir only; the
+		// sync-back must not leave stale wrapper-PID metadata in the real home.
+		expect(
+			existsSync(join(originalHome, ".codex-multi-auth-owner.json")),
+		).toBe(false);
+		expect(
+			readdirSync(controlledTmp).filter((entry) =>
+				entry.startsWith("codex-multi-auth-home-"),
+			),
+		).toEqual([]);
+	});
+
 	it("preserves the later auth sync-back from concurrent compatibility shadow homes", async () => {
 		const fixtureRoot = createWrapperFixture();
 		const markerDir = join(fixtureRoot, "markers");
@@ -8983,5 +9034,448 @@ describe("codex bin wrapper", () => {
 			});
 		},
 		240_000,
+	);
+});
+
+describe("forwarded signal relay", () => {
+	// The wrapper used to install no signal handlers on the forward path, so a
+	// signal aimed at the wrapper PID (kill, launcher, monitor) orphaned the
+	// forwarded child and skipped shadow-home cleanup entirely.
+	// Windows has no POSIX signal delivery to a wrapper PID, so `kill()` there
+	// hard-terminates the process instead of exercising the relay; these cases
+	// only make sense where kill() really sends SIGTERM/SIGINT.
+	it.skipIf(process.platform === "win32")(
+		"relays SIGTERM to the forwarded child, then runs shadow-home cleanup",
+		async () => {
+			const fixtureRoot = createWrapperFixture();
+			const childPidFile = join(fixtureRoot, "child.pid");
+			const childHomeFile = join(fixtureRoot, "child.home");
+			const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+				'const { writeFileSync } = require("node:fs");',
+				'const { join: joinPath } = require("node:path");',
+				`writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));`,
+				`writeFileSync(${JSON.stringify(childHomeFile)}, String(process.env.CODEX_HOME ?? ""));`,
+				// A state write the sync-back must carry into the real home.
+				'writeFileSync(joinPath(process.env.CODEX_HOME, "auth.json"), "{\\"token\\":\\"shadow\\"}\\n");',
+				"setTimeout(() => {}, 30_000);",
+			]);
+			const originalHome = join(fixtureRoot, "codexhome");
+			const controlledTmp = join(fixtureRoot, "tmp");
+			mkdirSync(originalHome, { recursive: true });
+			mkdirSync(controlledTmp, { recursive: true });
+			writeFileSync(
+				join(originalHome, "config.toml"),
+				'model_reasoning_effort = "max"\n',
+				"utf8",
+			);
+			const wrapper = spawn(
+				process.execPath,
+				[
+					join(fixtureRoot, "scripts", "codex.js"),
+					"exec",
+					"status",
+					"--model",
+					"gpt-5.5",
+				],
+				{
+					env: buildWrapperEnv({
+						HOME: join(fixtureRoot, "home"),
+						USERPROFILE: join(fixtureRoot, "home"),
+						CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+						CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+						CODEX_HOME: originalHome,
+						TMP: controlledTmp,
+						TEMP: controlledTmp,
+						TMPDIR: controlledTmp,
+					}),
+					stdio: ["ignore", "pipe", "pipe"],
+				},
+			);
+			let wrapperStderr = "";
+			wrapper.stderr?.setEncoding("utf8");
+			wrapper.stderr?.on("data", (chunk: string) => {
+				wrapperStderr += chunk;
+			});
+			const closed = new Promise<{ status: number | null; signal: string | null }>(
+				(resolve) => {
+					wrapper.once("close", (status, signal) => resolve({ status, signal }));
+				},
+			);
+			try {
+				await waitForPath(childPidFile, 15_000);
+			} catch (error) {
+				wrapper.kill("SIGKILL");
+				await closed;
+				throw new Error(
+					`${String(error)}\nwrapper stderr:\n${wrapperStderr}`,
+				);
+			}
+			const childPid = Number(readFileSync(childPidFile, "utf8"));
+			const shadowHome = readFileSync(childHomeFile, "utf8");
+			expect(Number.isFinite(childPid)).toBe(true);
+			expect(isProcessAlive(childPid)).toBe(true);
+			// Sanity: the child really ran in a compatibility shadow home, so the
+			// cleanup assertions below exercise the signal path end to end.
+			expect(shadowHome).toContain("codex-multi-auth-home-");
+			expect(existsSync(shadowHome)).toBe(true);
+
+			wrapper.kill("SIGTERM");
+			const result = await closed;
+
+			// The forwarded child must be dead — not just eventually, but because the
+			// wrapper relayed the signal (grace bound is 1s + force-kill fallback).
+			const deadline = Date.now() + 5_000;
+			while (isProcessAlive(childPid) && Date.now() < deadline) {
+				await sleep(50);
+			}
+			expect(isProcessAlive(childPid)).toBe(false);
+			expect(result.status).toBe(143);
+			// Cleanup ran on the signal path: the shadow is gone, its state synced
+			// back, and the owner marker never leaks into the real CODEX_HOME.
+			expect(existsSync(shadowHome)).toBe(false);
+			expect(readFileSync(join(originalHome, "auth.json"), "utf8").trim()).toBe(
+				'{"token":"shadow"}',
+			);
+			expect(
+				existsSync(join(originalHome, ".codex-multi-auth-owner.json")),
+			).toBe(false);
+		},
+		SHUTDOWN_TEST_TIMEOUT_MS,
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"force-kills a child that ignores the relayed signal",
+		async () => {
+			const fixtureRoot = createWrapperFixture();
+			const childPidFile = join(fixtureRoot, "child.pid");
+			const childHomeFile = join(fixtureRoot, "child.home");
+			const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+				'const { writeFileSync } = require("node:fs");',
+				'const { join: joinPath } = require("node:path");',
+				`writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));`,
+				`writeFileSync(${JSON.stringify(childHomeFile)}, String(process.env.CODEX_HOME ?? ""));`,
+				'writeFileSync(joinPath(process.env.CODEX_HOME, "auth.json"), "{\\"token\\":\\"shadow\\"}\\n");',
+				// Swallow SIGTERM so only the wrapper's SIGKILL fallback can stop it.
+				'process.on("SIGTERM", () => {});',
+				'process.on("SIGINT", () => {});',
+				"setTimeout(() => {}, 30_000);",
+			]);
+			const originalHome = join(fixtureRoot, "codexhome");
+			const controlledTmp = join(fixtureRoot, "tmp");
+			mkdirSync(originalHome, { recursive: true });
+			mkdirSync(controlledTmp, { recursive: true });
+			writeFileSync(
+				join(originalHome, "config.toml"),
+				'model_reasoning_effort = "max"\n',
+				"utf8",
+			);
+			const wrapper = spawn(
+				process.execPath,
+				[
+					join(fixtureRoot, "scripts", "codex.js"),
+					"exec",
+					"status",
+					"--model",
+					"gpt-5.5",
+				],
+				{
+					env: buildWrapperEnv({
+						HOME: join(fixtureRoot, "home"),
+						USERPROFILE: join(fixtureRoot, "home"),
+						CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+						CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+						CODEX_HOME: originalHome,
+						TMP: controlledTmp,
+						TEMP: controlledTmp,
+						TMPDIR: controlledTmp,
+					}),
+					stdio: ["ignore", "pipe", "pipe"],
+				},
+			);
+			const closed = new Promise<{ status: number | null }>((resolve) => {
+				wrapper.once("close", (status) => resolve({ status }));
+			});
+			await waitForPath(childPidFile, 8_000);
+			const childPid = Number(readFileSync(childPidFile, "utf8"));
+			const shadowHome = readFileSync(childHomeFile, "utf8");
+			expect(shadowHome).toContain("codex-multi-auth-home-");
+
+			wrapper.kill("SIGTERM");
+			const result = await closed;
+
+			const deadline = Date.now() + 5_000;
+			while (isProcessAlive(childPid) && Date.now() < deadline) {
+				await sleep(50);
+			}
+			expect(isProcessAlive(childPid)).toBe(false);
+			// Still 143, not 137: the SIGKILL is the wrapper's internal fallback,
+			// and the exit result must keep reporting the signal that was relayed.
+			expect(result.status).toBe(143);
+			// Finalization waited for the child's close: the shadow home the dead
+			// child was using is removed and its state synced back on the way out.
+			expect(existsSync(shadowHome)).toBe(false);
+			expect(readFileSync(join(originalHome, "auth.json"), "utf8").trim()).toBe(
+				'{"token":"shadow"}',
+			);
+			expect(
+				existsSync(join(originalHome, ".codex-multi-auth-owner.json")),
+			).toBe(false);
+		},
+		SHUTDOWN_TEST_TIMEOUT_MS,
+	);
+
+	it.skipIf(process.platform === "win32")(
+		"keeps relaying when more signals arrive while the child ignores the first",
+		async () => {
+			const fixtureRoot = createWrapperFixture();
+			const childPidFile = join(fixtureRoot, "child.pid");
+			const childHomeFile = join(fixtureRoot, "child.home");
+			const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+				'const { writeFileSync } = require("node:fs");',
+				'const { join: joinPath } = require("node:path");',
+				`writeFileSync(${JSON.stringify(childPidFile)}, String(process.pid));`,
+				`writeFileSync(${JSON.stringify(childHomeFile)}, String(process.env.CODEX_HOME ?? ""));`,
+				// Swallow every relayed signal so only the SIGKILL fallback stops it.
+				'process.on("SIGTERM", () => {});',
+				'process.on("SIGINT", () => {});',
+				'process.on("SIGHUP", () => {});',
+				"setTimeout(() => {}, 30_000);",
+			]);
+			const originalHome = join(fixtureRoot, "codexhome");
+			const controlledTmp = join(fixtureRoot, "tmp");
+			mkdirSync(originalHome, { recursive: true });
+			mkdirSync(controlledTmp, { recursive: true });
+			writeFileSync(
+				join(originalHome, "config.toml"),
+				'model_reasoning_effort = "max"\n',
+				"utf8",
+			);
+			const wrapper = spawn(
+				process.execPath,
+				[
+					join(fixtureRoot, "scripts", "codex.js"),
+					"exec",
+					"status",
+					"--model",
+					"gpt-5.5",
+				],
+				{
+					env: buildWrapperEnv({
+						HOME: join(fixtureRoot, "home"),
+						USERPROFILE: join(fixtureRoot, "home"),
+						CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+						CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+						CODEX_HOME: originalHome,
+						TMP: controlledTmp,
+						TEMP: controlledTmp,
+						TMPDIR: controlledTmp,
+					}),
+					stdio: ["ignore", "pipe", "pipe"],
+				},
+			);
+			const closed = new Promise<{ status: number | null }>((resolve) => {
+				wrapper.once("close", (status) => resolve({ status }));
+			});
+			await waitForPath(childPidFile, 8_000);
+			const childPid = Number(readFileSync(childPidFile, "utf8"));
+			const shadowHome = readFileSync(childHomeFile, "utf8");
+			expect(shadowHome).toContain("codex-multi-auth-home-");
+
+			wrapper.kill("SIGTERM");
+			await sleep(250);
+			// Still inside the 1s grace window with a live force-kill timer: a
+			// repeated signal must keep relaying rather than taking the default
+			// disposition and killing the wrapper before cleanup.
+			wrapper.kill("SIGTERM");
+			await sleep(250);
+			wrapper.kill("SIGINT");
+			const result = await closed;
+
+			const deadline = Date.now() + 5_000;
+			while (isProcessAlive(childPid) && Date.now() < deadline) {
+				await sleep(50);
+			}
+			expect(isProcessAlive(childPid)).toBe(false);
+			// The wrapper survived the repeat signals and exited on its own terms:
+			// 143 is the first relayed signal, not a signal death (status null).
+			expect(result.status).toBe(143);
+			expect(existsSync(shadowHome)).toBe(false);
+			expect(
+				existsSync(join(originalHome, ".codex-multi-auth-owner.json")),
+			).toBe(false);
+		},
+		SHUTDOWN_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("stale shadow-home sweep", () => {
+	it("removes dead-owner and aged markerless shadow homes, keeps live ones", async () => {
+		const fixtureRoot = createWrapperFixture();
+		const codexHome = join(fixtureRoot, "codexhome");
+		const shadowRoot = join(
+			codexHome,
+			"multi-auth",
+			"runtime-shadow-homes",
+		);
+		mkdirSync(shadowRoot, { recursive: true });
+		const OWNER_FILE = ".codex-multi-auth-owner.json";
+
+		const deadOwnerDir = mkdtempSync(
+			join(shadowRoot, "codex-multi-auth-runtime-home-"),
+		);
+		const liveOwnerDir = mkdtempSync(
+			join(shadowRoot, "codex-multi-auth-runtime-home-"),
+		);
+		const markerlessOldDir = mkdtempSync(
+			join(shadowRoot, "codex-multi-auth-runtime-home-"),
+		);
+		const markerlessFreshDir = mkdtempSync(
+			join(shadowRoot, "codex-multi-auth-runtime-home-"),
+		);
+
+		writeFileSync(
+			join(liveOwnerDir, OWNER_FILE),
+			JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+		);
+		const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+		utimesSync(markerlessOldDir, old, old);
+
+		const fakeBin = createFakeCodexBin(fixtureRoot);
+		await withDeadPid(async (deadPid) => {
+			writeFileSync(
+				join(deadOwnerDir, OWNER_FILE),
+				JSON.stringify({ pid: deadPid, createdAt: Date.now() - 60_000 }),
+			);
+
+			const result = runWrapper(fixtureRoot, ["exec", "do"], {
+				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+				CODEX_HOME: codexHome,
+				CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+			});
+			expect(result.status).toBe(0);
+
+			expect(existsSync(deadOwnerDir)).toBe(false);
+			expect(existsSync(markerlessOldDir)).toBe(false);
+			expect(existsSync(liveOwnerDir)).toBe(true);
+			expect(existsSync(markerlessFreshDir)).toBe(true);
+		});
+	}, SHUTDOWN_TEST_TIMEOUT_MS);
+
+	it("keeps a shadow home whose owner died while its forwarded child still runs", async () => {
+		const fixtureRoot = createWrapperFixture();
+		const codexHome = join(fixtureRoot, "codexhome");
+		const shadowRoot = join(
+			codexHome,
+			"multi-auth",
+			"runtime-shadow-homes",
+		);
+		mkdirSync(shadowRoot, { recursive: true });
+		const OWNER_FILE = ".codex-multi-auth-owner.json";
+
+		const orphanedDir = mkdtempSync(
+			join(shadowRoot, "codex-multi-auth-runtime-home-"),
+		);
+		const fullyDeadDir = mkdtempSync(
+			join(shadowRoot, "codex-multi-auth-runtime-home-"),
+		);
+		const fakeBin = createFakeCodexBin(fixtureRoot);
+		const sweepEnv = {
+			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+			CODEX_HOME: codexHome,
+			CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+		};
+
+		await withDeadPids(2, async ([deadOwnerPid, deadChildPid]) => {
+			await withLivePid(async (liveChildPid) => {
+				// A SIGKILLed wrapper leaves a marker whose owner PID is dead while
+				// the forwarded child — recorded beside it — is still running
+				// against the shadow home. Reaping it would delete live state.
+				writeFileSync(
+					join(orphanedDir, OWNER_FILE),
+					JSON.stringify({
+						pid: deadOwnerPid,
+						createdAt: Date.now() - 60_000,
+						childPid: liveChildPid,
+						childRecordedAt: Date.now(),
+					}),
+				);
+				// Owner and child both gone: genuinely orphaned, reap it now.
+				writeFileSync(
+					join(fullyDeadDir, OWNER_FILE),
+					JSON.stringify({
+						pid: deadOwnerPid,
+						createdAt: Date.now() - 60_000,
+						childPid: deadChildPid,
+						childRecordedAt: Date.now() - 30_000,
+					}),
+				);
+
+				const result = runWrapper(fixtureRoot, ["exec", "do"], sweepEnv);
+				expect(result.status).toBe(0);
+
+				expect(existsSync(orphanedDir)).toBe(true);
+				expect(existsSync(fullyDeadDir)).toBe(false);
+			});
+
+			// Once the orphaned child is gone too, the next launch's sweep reaps.
+			const result = runWrapper(fixtureRoot, ["exec", "do"], sweepEnv);
+			expect(result.status).toBe(0);
+			expect(existsSync(orphanedDir)).toBe(false);
+		});
+	}, SHUTDOWN_TEST_TIMEOUT_MS);
+
+	// Identity probes need `ps`; on Windows the sweep falls back to bare
+	// liveness, so a recycled live PID would be retained rather than reaped.
+	it.skipIf(process.platform === "win32")(
+		"reaps a shadow home whose owner PID was recycled by another process",
+		async () => {
+			const fixtureRoot = createWrapperFixture();
+			const codexHome = join(fixtureRoot, "codexhome");
+			const shadowRoot = join(
+				codexHome,
+				"multi-auth",
+				"runtime-shadow-homes",
+			);
+			mkdirSync(shadowRoot, { recursive: true });
+			const OWNER_FILE = ".codex-multi-auth-owner.json";
+
+			const recycledOwnerDir = mkdtempSync(
+				join(shadowRoot, "codex-multi-auth-runtime-home-"),
+			);
+			const liveOwnerDir = mkdtempSync(
+				join(shadowRoot, "codex-multi-auth-runtime-home-"),
+			);
+			const fakeBin = createFakeCodexBin(fixtureRoot);
+
+			await withLivePid(async (livePid) => {
+				// The PID is live, but the marker claims it was written 10 minutes
+				// ago and this process started seconds ago — it cannot be the owner
+				// that wrote the marker, so the PID must have been recycled.
+				writeFileSync(
+					join(recycledOwnerDir, OWNER_FILE),
+					JSON.stringify({
+						pid: livePid,
+						createdAt: Date.now() - 10 * 60_000,
+					}),
+				);
+				// Control: the same live PID with a timestamp at-or-after its start
+				// is still the recorded owner, so its home is retained.
+				writeFileSync(
+					join(liveOwnerDir, OWNER_FILE),
+					JSON.stringify({ pid: livePid, createdAt: Date.now() }),
+				);
+
+				const result = runWrapper(fixtureRoot, ["exec", "do"], {
+					CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+					CODEX_HOME: codexHome,
+					CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+				});
+				expect(result.status).toBe(0);
+
+				expect(existsSync(recycledOwnerDir)).toBe(false);
+				expect(existsSync(liveOwnerDir)).toBe(true);
+			});
+		},
+		SHUTDOWN_TEST_TIMEOUT_MS,
 	);
 });
