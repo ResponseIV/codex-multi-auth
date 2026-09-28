@@ -97,7 +97,7 @@ The complete `pluginConfig` ↔ env accessor matrix is in [development/CONFIG_FI
 | Variable | Effect |
 | --- | --- |
 | `CODEX_MULTI_AUTH_SYNC_CODEX_CLI` | Force/disable active-account sync into official Codex CLI files |
-| `CODEX_MULTI_AUTH_REAL_CODEX_BIN` | Override official Codex binary discovery path |
+| `CODEX_MULTI_AUTH_REAL_CODEX_BIN` | Override official Codex binary discovery path (absolute path required) |
 | `CODEX_MULTI_AUTH_BYPASS=1` | Skip multi-auth intercept; forward everything to official Codex |
 | `CODEX_MULTI_AUTH_FORCE_ACCOUNT_INDEX` | Internal 0-based pin published by the wrapper after `--account` / `CODEX_MULTI_AUTH_FORCE_ACCOUNT` resolution |
 | `CODEX_MULTI_AUTH_STATUSLINE=0/1` | Disable/enable forwarded-session status line |

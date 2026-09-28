@@ -7349,6 +7349,77 @@ describe("codex bin wrapper", () => {
 		},
 	);
 
+	it.each(["linux", "darwin", "win32"] as const)(
+		"rejects a relative CODEX_MULTI_AUTH_REAL_CODEX_BIN override on %s",
+		(platform) => {
+			// The override names the binary every forwarded command execs. A
+			// relative value would resolve against the caller's cwd — a planted
+			// same-named file could be executed instead — so it is refused even
+			// when a file exists at that relative path.
+			const resolved = resolveRealCodexBin({
+				env: { CODEX_MULTI_AUTH_REAL_CODEX_BIN: join("bin", "codex.js") },
+				platform,
+				resolvePackageBin: () => null,
+				spawnSyncImpl: () => createSpawnSyncSuccess(""),
+				existsSyncImpl: () => true,
+			});
+
+			expect(resolved).toBeNull();
+		},
+	);
+
+	it.each(["\\bin\\codex.exe", "/bin/codex.exe", "\\", "/"])(
+		"rejects a Windows root-relative CODEX_MULTI_AUTH_REAL_CODEX_BIN override %s",
+		(override) => {
+			// win32.isAbsolute() accepts these, but a root-relative path resolves
+			// against the cwd's DRIVE — "<drive>:\bin\codex.exe" could be a planted
+			// file (CWE-426). The existence check does not make it drive-qualified.
+			const resolved = resolveRealCodexBin({
+				env: { CODEX_MULTI_AUTH_REAL_CODEX_BIN: override },
+				platform: "win32",
+				resolvePackageBin: () => null,
+				spawnSyncImpl: () => createSpawnSyncSuccess(""),
+				existsSyncImpl: () => true,
+			});
+
+			expect(resolved).toBeNull();
+		},
+	);
+
+	it.each(["C:\\bin\\codex.exe", "C:/bin/codex.exe", "\\\\server\\share\\codex.exe"])(
+		"accepts a fully-qualified Windows CODEX_MULTI_AUTH_REAL_CODEX_BIN override %s",
+		(override) => {
+			const resolved = resolveRealCodexBin({
+				env: { CODEX_MULTI_AUTH_REAL_CODEX_BIN: override },
+				platform: "win32",
+				resolvePackageBin: () => null,
+				spawnSyncImpl: () => createSpawnSyncSuccess(""),
+				existsSyncImpl: (candidate) => candidate === override,
+			});
+
+			expect(resolved).toEqual({
+				path: override,
+				launchWithNode: false,
+			});
+		},
+	);
+
+	it("still accepts an absolute CODEX_MULTI_AUTH_REAL_CODEX_BIN override", () => {
+		const absoluteBin = posix.join("/opt", "codex", "bin", "codex.js");
+		const resolved = resolveRealCodexBin({
+			env: { CODEX_MULTI_AUTH_REAL_CODEX_BIN: absoluteBin },
+			platform: "linux",
+			resolvePackageBin: () => null,
+			spawnSyncImpl: () => createSpawnSyncSuccess(""),
+			existsSyncImpl: (candidate) => candidate === absoluteBin,
+		});
+
+		expect(resolved).toEqual({
+			path: absoluteBin,
+			launchWithNode: true,
+		});
+	});
+
 	it.skipIf(process.platform !== "win32")(
 		"forwards through a CODEX_MULTI_AUTH_REAL_CODEX_BIN codex.cmd shim on Windows",
 		() => {

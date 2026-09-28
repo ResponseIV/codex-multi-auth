@@ -205,6 +205,118 @@ function toUrlHost(host: string): string {
 	return bare.includes(":") ? `[${bare}]` : bare;
 }
 
+/**
+ * True only for a NUMERIC loopback literal, as `new URL().hostname` reports it.
+ *
+ * Duplicates the wrapper's predicate (scripts/codex.js) at library level — a
+ * hostname like "localhost" is deliberately NOT enough: it is resolved by the
+ * OS at connect time, so an /etc/hosts or Windows hosts entry can point it at
+ * a routable address, and the upstream request carries the managed OAuth
+ * bearer token and the request body. WHATWG URL always reports an IPv6 host in
+ * its bracketed form, so `::1` is only ever seen here as `[::1]`.
+ */
+function isNumericLoopbackUrlHostname(hostname: string): boolean {
+	if (hostname === "[::1]") {
+		return true;
+	}
+	const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+	if (!ipv4) {
+		return false;
+	}
+	const octets = ipv4.slice(1).map((part) => Number(part));
+	if (octets.some((octet) => !Number.isInteger(octet) || octet > 255)) {
+		return false;
+	}
+	// The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1.
+	return octets[0] === 127;
+}
+
+/**
+ * Whether the raw URL text carries an explicit `:port` (mirrors the wrapper).
+ *
+ * `new URL()` erases a port that matches the scheme default, so
+ * `http://127.0.0.1:80/x` reports `parsed.port === ""` and a `!parsed.port`
+ * check would reject a perfectly valid, explicitly-ported loopback URL.
+ */
+function urlHasExplicitPort(raw: string): boolean {
+	const withoutScheme = raw.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "");
+	const authority = withoutScheme.split(/[/?#]/, 1)[0] ?? "";
+	// Strip userinfo first, or a password containing ':' reads as a port.
+	const hostAndPort = authority.slice(authority.lastIndexOf("@") + 1);
+	if (hostAndPort.startsWith("[")) {
+		const close = hostAndPort.indexOf("]");
+		return close !== -1 && /^:\d+$/.test(hostAndPort.slice(close + 1));
+	}
+	const colon = hostAndPort.indexOf(":");
+	return colon !== -1 && /^:\d+$/.test(hostAndPort.slice(colon));
+}
+
+/**
+ * Library-boundary enforcement for the upstream the proxy forwards managed
+ * OAuth Bearer tokens to (runtime-proxy trust boundary).
+ *
+ * `options.upstreamBaseUrl` is a library input: callers are not all the
+ * wrapper, so the env-var validation in scripts/codex.js does not protect this
+ * boundary. A non-https or non-loopback value would exfiltrate account tokens
+ * to whatever host it names. The policy mirrors the wrapper exactly: https is
+ * always allowed, while http is accepted only for the documented dev path — a
+ * NUMERIC loopback host (127.0.0.0/8 or [::1], never a name) with an explicit
+ * port — and no URL may carry credentials, a query, or a fragment.
+ */
+function assertAllowedUpstreamBaseUrl(raw: string): void {
+	let parsed: URL;
+	try {
+		parsed = new URL(raw);
+	} catch {
+		throw new CodexValidationError(
+			`Runtime rotation proxy upstreamBaseUrl is not a valid absolute URL.`,
+			{ field: "upstreamBaseUrl", expected: "an https URL, or an http URL on a numeric loopback host with an explicit port" },
+		);
+	}
+
+	const isDevLoopback =
+		parsed.protocol === "http:" &&
+		isNumericLoopbackUrlHostname(parsed.hostname.toLowerCase()) &&
+		Boolean(parsed.port || urlHasExplicitPort(raw));
+	if (
+		(parsed.protocol !== "https:" && !isDevLoopback) ||
+		parsed.username ||
+		parsed.password ||
+		parsed.search ||
+		parsed.hash
+	) {
+		throw new CodexValidationError(
+			`Runtime rotation proxy refuses upstreamBaseUrl "${raw}". ` +
+				"It forwards managed OAuth tokens: use https, or http only on a " +
+				"numeric loopback host (127.0.0.0/8 or [::1]; a name such as " +
+				'"localhost" can resolve off-host) with an explicit port, and no ' +
+				"credentials, query, or fragment.",
+			{
+				field: "upstreamBaseUrl",
+				expected: "an https URL, or an http URL on a numeric loopback host with an explicit port",
+				context: { upstreamBaseUrl: raw },
+			},
+		);
+	}
+}
+
+/**
+ * Whether a fetch rejection is undici refusing to follow a redirect.
+ *
+ * The upstream fetch runs `redirect: "error"` so a 3xx can never re-send the
+ * managed Bearer token to an arbitrary host. Instead of a Response, fetch
+ * rejects with `TypeError("fetch failed")` whose `cause` is the network error
+ * `unexpected redirect` (see undici's httpNetworkOrCacheFetch). Check the cause
+ * level and the bare message so a custom fetchImpl delivering the same network
+ * error unwrapped classifies identically.
+ */
+function isRedirectRejection(error: unknown): boolean {
+	return [error, (error as { cause?: unknown } | null)?.cause].some(
+		(candidate) =>
+			candidate instanceof Error && candidate.message === "unexpected redirect",
+	);
+}
+
 // Structured logger for the default-on runtime proxy (errors-logging-01,
 // runtime-proxy-04). Previously the 1900-LOC proxy had zero logger integration;
 // failures surfaced only as a last-write-wins status.lastError string. Logs are
@@ -1004,6 +1116,13 @@ export async function startRuntimeRotationProxy(
 	const bindHost = toBindHost(host);
 	const urlHost = toUrlHost(host);
 	const port = options.port ?? 0;
+	// Library-boundary trust enforcement: the wrapper validates the env override,
+	// but options.upstreamBaseUrl reaches here from any caller — and Bearer
+	// tokens are forwarded to whatever host it names. https always passes; http
+	// is allowed only for the documented numeric-loopback dev path.
+	if (options.upstreamBaseUrl !== undefined) {
+		assertAllowedUpstreamBaseUrl(options.upstreamBaseUrl);
+	}
 	const upstreamBaseUrl = options.upstreamBaseUrl ?? CODEX_BASE_URL;
 	const clientApiKey =
 		typeof options.clientApiKey === "string" &&
@@ -2379,6 +2498,11 @@ async function handleRequestInner(
 					method: context.method,
 					headers: outboundHeaders,
 					signal: fetchAbortController.signal,
+					// Redirect pinning: never follow an upstream redirect — a 3xx from
+					// a compromised or misconfigured endpoint would re-send the
+					// managed Bearer token to an arbitrary host. Matches the model
+					// catalog fetch above.
+					redirect: "error",
 				};
 				if (context.method === "POST") {
 					upstreamRequestInit.body = context.body;
@@ -2415,6 +2539,31 @@ async function handleRequestInner(
 					error: transportError,
 				});
 				refundConsumedPoolToken(refreshed.account);
+				// A redirect rejection is upstream configuration, not a transport
+				// outage or an account-health signal: the 3xx arrived (so the path
+				// works and no generation started), the Bearer token never reached
+				// the redirect target, and every managed account would hit the
+				// same redirect — cooling + rotating here would drain the pool on
+				// one endpoint fault. This also covers the WebSocket httpFetch
+				// fallback: SocketSession preserves init, so a refused-upgrade
+				// turn on API/ZDR credentials can reject this way. Fail the
+				// request in place and leave account state untouched.
+				if (isRedirectRejection(error)) {
+					writeJson(res, 502, {
+						error: {
+							code: "upstream_redirect_rejected",
+							message:
+								"Upstream endpoint attempted a redirect; redirects are never followed.",
+						},
+					});
+					await usageRecorder.record({
+						outcome: "failure",
+						statusCode: 502,
+						errorCode: "upstream_redirect_rejected",
+						account: refreshed.account,
+					});
+					return;
+				}
 				// A timeout may occur after generation; do not retry within this request.
 				if (isImageRequest) {
 					writeJson(res, 502, {

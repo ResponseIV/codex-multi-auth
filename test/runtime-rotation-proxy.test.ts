@@ -461,6 +461,53 @@ describe("runtime rotation proxy", () => {
 		expect(response.status).toBe(502);
 		expect(calls).toHaveLength(1);
 	});
+	it("fails fast without cooling or rotating when the upstream answers a redirect", async () => {
+		// redirect:"error" turns an upstream 3xx into a fetch rejection (undici:
+		// TypeError "fetch failed" caused by "unexpected redirect"). That is
+		// upstream configuration, not a transport fault — every managed account
+		// would hit the same redirect — so it must not cool the account, rotate
+		// the pool, or let the redirect target see a request or credential.
+		const targetHits: string[] = [];
+		const redirectorHits: string[] = [];
+		const target = createServer((req, res) => {
+			targetHits.push(req.url ?? "");
+			res.writeHead(200);
+			res.end();
+		});
+		await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+		const targetPort = (target.address() as { port: number }).port;
+		const redirector = createServer((req, res) => {
+			redirectorHits.push(req.url ?? "");
+			res.writeHead(302, { location: `http://127.0.0.1:${targetPort}/stolen` });
+			res.end();
+		});
+		await new Promise<void>((resolve) => redirector.listen(0, "127.0.0.1", resolve));
+		const redirectorPort = (redirector.address() as { port: number }).port;
+
+		try {
+			const accountManager = new AccountManager(undefined, createStorage(Date.now()));
+			const coolingSpy = vi.spyOn(accountManager, "markAccountCoolingDown");
+			const proxy = await startProxy({
+				accountManager,
+				fetchImpl: fetch,
+				options: { upstreamBaseUrl: `http://127.0.0.1:${redirectorPort}` },
+			});
+
+			const response = await postResponses(proxy, { model: "gpt-5.6-sol" });
+			const body = (await response.json()) as { error?: { code?: string } };
+			expect(response.status).toBe(502);
+			expect(body.error?.code).toBe("upstream_redirect_rejected");
+
+			expect(targetHits).toHaveLength(0);
+			expect(redirectorHits).toHaveLength(1);
+			expect(coolingSpy).not.toHaveBeenCalled();
+		} finally {
+			await Promise.all([
+				new Promise<void>((resolve) => target.close(() => resolve())),
+				new Promise<void>((resolve) => redirector.close(() => resolve())),
+			]);
+		}
+	});
 	it("rotates images on an explicit quota rejection", async () => {
 		const accountManager = new AccountManager(undefined, createStorage(Date.now()));
 		const { calls, fetchImpl } = createRecordingFetch((_call, attempt) => attempt === 1 ? new Response('{"error":{"code":"rate_limit_exceeded"}}', { status: 429 }) : new Response('{"data":[{"b64_json":"aW1hZ2U="}]}', { headers: { "content-type": "application/json" } }));
@@ -522,7 +569,13 @@ describe("runtime rotation proxy", () => {
 			fetchImpl,
 			upstreamBaseUrl: "https://example.test/backend-api",
 		} as Parameters<typeof startRuntimeRotationProxy>[0]).then(
-			() => null,
+			// If validation regresses this resolves with a live server that is not
+			// tracked for cleanup — close it so a failed assertion cannot leave a
+			// listener open.
+			async (proxy) => {
+				await proxy.close();
+				return null;
+			},
 			(error: unknown) => error,
 		);
 		expect(missingKey).toBeInstanceOf(CodexValidationError);
@@ -538,7 +591,10 @@ describe("runtime rotation proxy", () => {
 			host: "0.0.0.0",
 			upstreamBaseUrl: "https://example.test/backend-api",
 		}).then(
-			() => null,
+			async (proxy) => {
+				await proxy.close();
+				return null;
+			},
 			(error: unknown) => error,
 		);
 		expect(badHost).toBeInstanceOf(CodexValidationError);
@@ -547,6 +603,63 @@ describe("runtime rotation proxy", () => {
 		expect((badHost as CodexValidationError).context).toEqual({
 			host: "0.0.0.0",
 		});
+	});
+
+	// Library-boundary trust enforcement: options.upstreamBaseUrl names the host
+	// every managed OAuth Bearer token is forwarded to. The wrapper validates the
+	// env override, but lib callers are not all the wrapper, so the proxy itself
+	// enforces https-only plus the documented numeric-loopback http dev path.
+	it.each([
+		"http://evil.example.com",
+		"http://example.com:8080/backend-api",
+		"http://localhost:8080",
+		"http://127.0.0.1",
+		"http://127.0.0.1/backend-api",
+		"ftp://127.0.0.1:9000",
+		"https://user:pw@example.com",
+		"https://example.com/backend-api?key=1",
+		"https://example.com/backend-api#frag",
+		"not a url",
+		"file:///etc/passwd",
+	])("rejects upstreamBaseUrl %s at startup", async (upstreamBaseUrl) => {
+		const accountManager = new AccountManager(undefined, createStorage(Date.now()));
+		const { fetchImpl } = createRecordingFetch(() => textEventStream());
+
+		const error = await startRuntimeRotationProxy({
+			accountManager,
+			fetchImpl,
+			clientApiKey: DEFAULT_CLIENT_API_KEY,
+			upstreamBaseUrl,
+		}).then(
+			async (proxy) => {
+				await proxy.close();
+				return null;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(error).toBeInstanceOf(CodexValidationError);
+		expect((error as CodexValidationError).field).toBe("upstreamBaseUrl");
+	});
+
+	it.each([
+		"https://example.test/backend-api",
+		"https://chatgpt.com/backend-api",
+		"http://127.0.0.1:8080",
+		"http://127.0.0.1:8080/backend-api",
+		"http://127.0.0.2:9999/base",
+		"http://[::1]:4444",
+		"http://127.0.0.1:80/dev",
+	])("accepts upstreamBaseUrl %s", async (upstreamBaseUrl) => {
+		const accountManager = new AccountManager(undefined, createStorage(Date.now()));
+		const { fetchImpl } = createRecordingFetch(() => textEventStream());
+
+		const proxy = await startProxy({
+			accountManager,
+			fetchImpl,
+			options: { upstreamBaseUrl },
+		});
+		expect(proxy.port).toBeGreaterThan(0);
+		await proxy.close();
 	});
 
 	// Regression (runtime-proxy-01): the proxy forwards managed OAuth tokens and must

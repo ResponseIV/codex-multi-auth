@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { basename, join } from "node:path";
 import { logWarn } from "./logger.js";
@@ -70,6 +70,30 @@ function normalizeLabel(value: string | undefined): string {
 
 function hashToken(token: string): string {
 	return `sha256:${createHash("sha256").update(token).digest("hex")}`;
+}
+
+/**
+ * Constant-time equality for two `sha256:<hex>` token hashes.
+ *
+ * A `===` on the hex strings returns early at the first differing byte, so a
+ * local process that can spam verify calls could measure the comparison cost
+ * and recover a stored hash prefix byte-by-byte. Comparing the decoded digest
+ * bytes with timingSafeEqual removes the oracle; both inputs are validated to
+ * the fixed 32-byte shape first, so timingSafeEqual never throws.
+ */
+function sha256DigestBytes(hash: string): Buffer | null {
+	if (!/^sha256:[0-9a-f]{64}$/i.test(hash)) return null;
+	return Buffer.from(hash.slice("sha256:".length), "hex");
+}
+
+function tokenHashEqual(left: string, right: string): boolean {
+	const leftDigest = sha256DigestBytes(left);
+	const rightDigest = sha256DigestBytes(right);
+	return (
+		leftDigest !== null &&
+		rightDigest !== null &&
+		timingSafeEqual(leftDigest, rightDigest)
+	);
 }
 
 function createPlainToken(): string {
@@ -294,7 +318,7 @@ export async function verifyLocalClientBearerToken(
 	return enqueue(async () => {
 		const store = await loadLocalClientTokenStore();
 		const record = store.tokens.find(
-			(entry) => entry.revokedAt === null && entry.tokenHash === tokenHash,
+			(entry) => entry.revokedAt === null && tokenHashEqual(entry.tokenHash, tokenHash),
 		);
 		if (!record) return null;
 		// Token match (verification correctness) is decided above and never

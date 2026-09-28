@@ -90,6 +90,21 @@ function resolveWindowsCmdPath(env) {
 	return "cmd.exe";
 }
 
+// win32.isAbsolute("\bin\codex.exe") is true for a root-relative path with no
+// drive — it resolves against the CURRENT drive, so the existence check would
+// probe (and a forwarder would exec) whatever file lives at "<cwd's
+// drive>\bin\codex.exe". CWE-426: a binary override must be drive-qualified
+// (C:\...) or a UNC/device path (\\server\share\..., \\?\...), never a bare
+// "\" or "/" root. POSIX keeps plain absolute-path semantics.
+export function isFullyQualifiedBinOverride(candidatePath, platform) {
+	if (platform === "win32") {
+		if (!win32.isAbsolute(candidatePath)) return false;
+		const root = win32.parse(candidatePath).root;
+		return root !== "\\" && root !== "/";
+	}
+	return posix.isAbsolute(candidatePath);
+}
+
 export function splitPathEntries(pathValue, platform = process.platform) {
 	if (typeof pathValue !== "string" || pathValue.trim().length === 0) {
 		return [];
@@ -235,7 +250,11 @@ export function resolveRealCodexBin(options = {}) {
 
 	const override = (env.CODEX_MULTI_AUTH_REAL_CODEX_BIN ?? "").trim();
 	if (override.length > 0) {
-		if (!existsSyncImpl(override)) return null;
+		// The override is the binary every forwarded command execs, so require a
+		// fully-qualified absolute path: a relative one resolves against the
+		// caller's cwd, and on Windows a root-relative one resolves against the
+		// cwd's DRIVE — either could silently exec a planted file.
+		if (!isFullyQualifiedBinOverride(override, platform) || !existsSyncImpl(override)) return null;
 		if (platform === "win32" && isWindowsShimPath(override)) {
 			const entry = resolveWindowsShimPackageEntry(override, existsSyncImpl);
 			return entry ? createResolvedCodexBin(entry) : null;
