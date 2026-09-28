@@ -10,6 +10,7 @@ import {
     addCodexBridgeMessage,
     transformRequestBody,
     trimInputForFastSession,
+    resolveFastSessionInputTrimPlan,
 } from '../lib/request/request-transformer.js';
 import * as loggerModule from '../lib/logger.js';
 import { TOOL_REMAP_MESSAGE } from '../lib/prompts/codex.js';
@@ -2900,3 +2901,86 @@ describe('Request Transformer Module', () => {
 
 
 
+
+describe('prompt complexity detection (ReDoS regression)', () => {
+	// The old `/(^|\n)\s*(?:[-*]|\d+\.)\s+\S/m` pattern let `\s*` span blank
+	// lines, so every `\n` anchor rescanned the remaining whitespace run: a
+	// long blank-line run backtracked quadratically (>20s observed on a
+	// multi-MB payload). The replacement confines whitespace to a single
+	// line, so the scan stays linear. The fixture must keep two non-empty
+	// lines (`x` and `end`): an all-whitespace body trims to empty and three
+	// non-empty lines trip the `lineCount >= 3` early return — both skip the
+	// list-marker detector entirely. At this size the old pattern would blow
+	// past the default test timeout, which is the deterministic bound.
+	it('classifies a prompt with a long blank-line run without hanging', () => {
+		const body: RequestBody = {
+			model: 'gpt-5.5',
+			input: [
+				{
+					type: 'message',
+					role: 'user',
+					content: `x\n${'\n'.repeat(200_000)}end`,
+				},
+			],
+		};
+		const plan = resolveFastSessionInputTrimPlan(body, true, 'hybrid', 12);
+		// Two non-empty lines, no list marker or pipe: not complex, so the fast
+		// session trim applies — proving the input reached the detector and the
+		// detector rejected it.
+		expect(plan.shouldApply).toBe(true);
+		expect(plan.isTrivialTurn).toBe(false);
+		expect(plan.trim?.preferLatestUserOnly).toBe(false);
+	});
+
+	it('detects a list marker sitting behind a long blank-line run', () => {
+		// Sentinel for detector reachability: the marker is only seen because
+		// the pattern scans across the whole blank-line run.
+		const body: RequestBody = {
+			model: 'gpt-5.5',
+			input: [
+				{
+					type: 'message',
+					role: 'user',
+					content: `x\n${'\n'.repeat(50_000)}- item`,
+				},
+			],
+		};
+		expect(
+			resolveFastSessionInputTrimPlan(body, true, 'hybrid', 12).shouldApply,
+		).toBe(false);
+	});
+
+	it('still detects list markers and table pipes', () => {
+		const listBody: RequestBody = {
+			model: 'gpt-5.5',
+			input: [
+				{
+					type: 'message',
+					role: 'user',
+					// Only the list lines: a third non-empty line would trip the
+					// `lineCount >= 3` early return before the list-marker detector
+					// runs.
+					content: '  - first item\n  - second item',
+				},
+			],
+		};
+		const listPlan = resolveFastSessionInputTrimPlan(
+			listBody,
+			true,
+			'hybrid',
+			12,
+		);
+		expect(listPlan.shouldApply).toBe(false);
+
+		const ordered: RequestBody = {
+			model: 'gpt-5.5',
+			input: [
+				{ type: 'message', role: 'user', content: '1. one\n2. two' },
+			],
+		};
+		expect(
+			resolveFastSessionInputTrimPlan(ordered, true, 'hybrid', 12)
+				.shouldApply,
+		).toBe(false);
+	});
+});
