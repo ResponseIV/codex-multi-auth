@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 *.tsbuildinfo
 bun.lockb
 pnpm-lock.yaml
@@ -36,3 +36,6 @@ test-results.md
 
 # OMC session scratch (never publish)
 .omc/
+
+# worktrees (git worktree add .worktrees/...)
+.worktrees/
