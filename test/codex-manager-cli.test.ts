@@ -729,6 +729,10 @@ describe("codex manager cli commands", () => {
 	beforeEach(async () => {
 		vi.resetModules();
 		vi.clearAllMocks();
+		const { resetActiveAccountSyncMetaForTests } = await import(
+			"../lib/codex-manager/active-account-sync.js"
+		);
+		resetActiveAccountSyncMetaForTests();
 		storageMocks.loadAccounts.mockReset();
 		storageMocks.loadFlaggedAccounts.mockReset();
 		storageMocks.saveAccounts.mockReset();

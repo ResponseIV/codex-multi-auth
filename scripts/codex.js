@@ -1330,7 +1330,10 @@ async function autoSyncManagerActiveSelectionIfEnabled() {
 	if (!enabled) return;
 
 	try {
-		const mod = await import("../dist/lib/codex-manager.js");
+		// Slim entry point: importing dist/lib/codex-manager.js here would pull
+		// the whole command/dispatch/settings graph (~126 modules incl. zod)
+		// onto every forwarded invocation's cold-start path.
+		const mod = await import("../dist/lib/codex-manager/active-account-sync.js");
 		if (typeof mod.autoSyncActiveAccountToCodex !== "function") {
 			return;
 		}
