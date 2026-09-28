@@ -163,6 +163,7 @@ export {
 	resetPinCacheForTesting,
 } from "./runtime/rotation-storage-meta.js";
 export type { StorageMeta } from "./runtime/rotation-storage-meta.js";
+export { resetRuntimePolicyCacheForTests } from "./policy/runtime-policy-cache.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 
