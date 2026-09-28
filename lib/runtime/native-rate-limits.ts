@@ -18,12 +18,16 @@ async function sweepStaleHomes(root:string):Promise<void>{
  }));
 }
 type Method='account/rateLimits/read'|'account/rateLimitResetCredit/consume';
-function nativeCommand():string[]{
+/** @internal Native usage needs the desktop backend when it is installed. */
+export function resolveNativeUsageCommand(platform:NodeJS.Platform=process.platform):string[]{
  const override=process.env.CODEX_MULTI_AUTH_USAGE_CODEX_BIN?.trim();
  if(override){if(!isAbsolute(override)||!existsSync(override))throw Error('Native usage executable must be an existing absolute path');return [override];}
  // Prefer the desktop backend whose protocol supplies the native usage UI.
- const bundled='/Applications/ChatGPT.app/Contents/Resources/codex';
- if(process.platform==='darwin'&&existsSync(bundled))return [bundled];
+ const bundled=[
+  '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+  '/Applications/ChatGPT.app/Contents/Resources/codex',
+ ];
+ if(platform==='darwin'){const executable=bundled.find(path=>existsSync(path));if(executable)return [executable];}
  try{return [process.execPath,createRequire(import.meta.url).resolve('@openai/codex/bin/codex.js')];}
  catch{throw Error('Native usage backend unavailable; set CODEX_MULTI_AUTH_USAGE_CODEX_BIN to the native Codex executable');}
 }
@@ -31,7 +35,7 @@ function nativeCommand():string[]{
  * global configuration, or desktop auth changes are available to this process. */
 export async function nativeRateLimitsRpc(auth:NativeUsageAuth,method:Method,params:Record<string,unknown>,options:{command?:string[];tempRoot?:string;timeoutMs?:number}={}):Promise<unknown>{
  if(!auth.accessToken||!auth.accountId||auth.expiresAt<=Date.now()+30000)throw Error('Native usage requires a fresh account access token');
- const command=options.command??nativeCommand();const executable=command[0];if(!executable)throw Error('Native usage backend unavailable');
+ const command=options.command??resolveNativeUsageCommand();const executable=command[0];if(!executable)throw Error('Native usage backend unavailable');
  // The home briefly holds an access token: keep it in the user-private multi-auth
  // directory (chmod is a no-op on Windows %TEMP%) and sweep leftovers of hard kills.
  const root=options.tempRoot??join(getCodexMultiAuthDir(),'tmp');

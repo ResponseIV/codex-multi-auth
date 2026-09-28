@@ -14,12 +14,14 @@ it('routes the standalone resets command through the CLI dispatcher',async()=>{
 });
 
 it('check resets refreshes counts and prints emails without redeeming credits', async () => {
- f.refresh.mockResolvedValue({});
+ const {resetTargetForStoredAccount}=await import('../lib/runtime/account-reset-credits.js');
+ const key=resetTargetForStoredAccount({accountId:'workspace',email:'reader@example.test',refreshToken:'secret',addedAt:1,lastUsed:1})!.key;
+ f.refresh.mockResolvedValue({[key]:{updatedAt:Date.now(),availableCount:2}});
  const {runCodexMultiAuthCli}=await import('../lib/codex-manager.js');
  expect(await runCodexMultiAuthCli(['check','resets'])).toBe(0);
  expect(f.refresh).toHaveBeenCalledTimes(1);
  expect(f.redeem).not.toHaveBeenCalled();
- expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Account 1 (reader@example.test): unknown reset credits'));
+ expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Account 1 (reader@example.test): 2 reset credits'));
 });
 
 it('check capabilities refreshes only model discovery through the CLI dispatcher', async () => {
@@ -84,4 +86,33 @@ it('identifies a disabled pending account without calling it removed',async()=>{
  expect(await runResetsCommand(['redeem','1'])).toBe(1);
  const output=JSON.stringify(vi.mocked(console.error).mock.calls);
  expect(output).toContain('account 2');expect(output).toContain('disabled');expect(output).not.toContain('was removed');
+});
+
+it('reports every failed refresh and exits nonzero instead of silently succeeding with unknown counts', async () => {
+ f.refresh.mockResolvedValue({});
+ expect(await runResetsCommand(['list', '--refresh'])).toBe(1);
+ expect(console.error).toHaveBeenCalledWith(expect.stringContaining('1 of 1 reset-credit reads failed'));
+ expect(console.error).toHaveBeenCalledWith(expect.stringContaining('CODEX_MULTI_AUTH_USAGE_CODEX_BIN'));
+ expect(f.redeem).not.toHaveBeenCalled();
+});
+
+it('keeps successful rows while reporting a partially failed refresh', async () => {
+ const { resetTargetForStoredAccount } = await import('../lib/runtime/account-reset-credits.js');
+ const other = { accountId: 'other-workspace', refreshToken: 'fixture', addedAt: 1, lastUsed: 1 };
+ f.extraAccounts = [other];
+ const key = resetTargetForStoredAccount(other)!.key;
+ f.refresh.mockResolvedValue({ [key]: { updatedAt: Date.now(), availableCount: 2 } });
+ expect(await runResetsCommand(['list', '--refresh'])).toBe(1);
+ expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Account 2: 2 reset credits'));
+ expect(console.error).toHaveBeenCalledWith(expect.stringContaining('1 of 2 reset-credit reads failed'));
+ expect(f.redeem).not.toHaveBeenCalled();
+});
+
+it('accepts a successful read whose credit count is unavailable', async () => {
+ const {resetTargetForStoredAccount}=await import('../lib/runtime/account-reset-credits.js');
+ const key=resetTargetForStoredAccount({accountId:'workspace',email:'reader@example.test',refreshToken:'secret',addedAt:1,lastUsed:1})!.key;
+ f.refresh.mockResolvedValue({[key]:{updatedAt:Date.now(),availableCount:null}});
+ expect(await runResetsCommand(['list','--refresh'])).toBe(0);
+ expect(console.error).not.toHaveBeenCalled();
+ expect(console.log).toHaveBeenCalledWith(expect.stringContaining('unknown reset credits (checked'));
 });
