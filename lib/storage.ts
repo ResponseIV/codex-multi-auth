@@ -1087,21 +1087,344 @@ export function resolveAccountSelectionIndex<
 	return clampIndex(fallbackIndex, accounts.length);
 }
 
+type DedupIndexEntry = {
+	index: number;
+	lastUsed: number;
+	addedAt: number;
+};
+
+/**
+ * Total "newest" order over surviving entries, identical to folding
+ * selectNewestAccount left-to-right over the survivor array: higher
+ * `lastUsed` wins, then higher `addedAt`, then — the fold's behavior on a
+ * full tie — the later array position. Reducing the fold to one comparison
+ * over (lastUsed, addedAt, index) is what lets each identity lookup be
+ * answered from an incrementally maintained index instead of a linear scan.
+ */
+function compareDedupIndexEntries(
+	a: DedupIndexEntry,
+	b: DedupIndexEntry,
+): number {
+	if (a.lastUsed !== b.lastUsed) return a.lastUsed - b.lastUsed;
+	if (a.addedAt !== b.addedAt) return a.addedAt - b.addedAt;
+	return a.index - b.index;
+}
+
+/**
+ * Incremental "newest surviving owner" index for one identity facet value
+ * (a composite accountId+email pair, an email key, or a refresh token).
+ * Survivor slots join when appended, refresh their freshness when a
+ * newest-wins merge replaces the account stored in the slot, and leave when
+ * a replacement drops the facet. A max-heap with lazy deletion answers the
+ * argmax query in amortized O(log n): stale heap entries are popped on
+ * first sight, so every join/update/leave is paid for exactly once.
+ */
+class DedupNewestIndex {
+	private readonly liveEntries = new Map<number, DedupIndexEntry>();
+	private readonly heap: DedupIndexEntry[] = [];
+
+	get size(): number {
+		return this.liveEntries.size;
+	}
+
+	set(index: number, account: Pick<AccountLike, "addedAt" | "lastUsed">): void {
+		const entry: DedupIndexEntry = {
+			index,
+			lastUsed: account.lastUsed || 0,
+			addedAt: account.addedAt || 0,
+		};
+		this.liveEntries.set(index, entry);
+		const heap = this.heap;
+		let slot = heap.length;
+		heap.push(entry);
+		while (slot > 0) {
+			const parent = (slot - 1) >> 1;
+			const parentEntry = heap[parent];
+			if (
+				parentEntry === undefined ||
+				compareDedupIndexEntries(parentEntry, entry) >= 0
+			) {
+				break;
+			}
+			heap[slot] = parentEntry;
+			slot = parent;
+		}
+		heap[slot] = entry;
+	}
+
+	delete(index: number): void {
+		this.liveEntries.delete(index);
+	}
+
+	newestIndex(): number | undefined {
+		const heap = this.heap;
+		while (heap.length > 0) {
+			const top = heap[0];
+			if (top !== undefined && this.liveEntries.get(top.index) === top) {
+				return top.index;
+			}
+			this.dropHeapTop();
+		}
+		return undefined;
+	}
+
+	private dropHeapTop(): void {
+		const heap = this.heap;
+		const last = heap.pop();
+		if (last === undefined || heap.length === 0) return;
+		heap[0] = last;
+		let slot = 0;
+		for (;;) {
+			const left = slot * 2 + 1;
+			const right = left + 1;
+			let best = slot;
+			let bestEntry = heap[best] ?? last;
+			const leftEntry = left < heap.length ? heap[left] : undefined;
+			if (
+				leftEntry !== undefined &&
+				compareDedupIndexEntries(leftEntry, bestEntry) > 0
+			) {
+				best = left;
+				bestEntry = leftEntry;
+			}
+			const rightEntry = right < heap.length ? heap[right] : undefined;
+			if (
+				rightEntry !== undefined &&
+				compareDedupIndexEntries(rightEntry, bestEntry) > 0
+			) {
+				best = right;
+			}
+			if (best === slot) break;
+			const slotEntry = heap[slot];
+			const bestValue = heap[best];
+			if (bestValue !== undefined) heap[slot] = bestValue;
+			if (slotEntry !== undefined) heap[best] = slotEntry;
+			slot = best;
+		}
+	}
+}
+
+type DedupEmailIndex = {
+	newest: DedupNewestIndex;
+	// Multiset of the owners' non-empty accountIds, for the ambiguous
+	// email-only refusal (more than one distinct id including the
+	// candidate's own => no safe match).
+	accountIds: Map<string, number>;
+};
+
+type DedupRefreshIndex = {
+	newest: DedupNewestIndex;
+	// Owner accountId/emailKey multisets, for the compatibility vetoes a
+	// refresh-token match applies before picking a survivor.
+	accountIds: Map<string, number>;
+	emailKeys: Map<string, number>;
+};
+
+function bumpIdentityCount(
+	counts: Map<string, number>,
+	key: string | undefined,
+	delta: number,
+): void {
+	if (!key) return;
+	const next = (counts.get(key) ?? 0) + delta;
+	if (next <= 0) {
+		counts.delete(key);
+	} else {
+		counts.set(key, next);
+	}
+}
+
+function dedupCompositeKey(ref: AccountIdentityRef): string | undefined {
+	if (!ref.accountId || !ref.emailKey) return undefined;
+	// JSON encoding keeps the pair unambiguous even for adversarial strings.
+	return JSON.stringify([ref.accountId, ref.emailKey]);
+}
+
+/**
+ * One dedup pass in O(n log n): every candidate is matched against the
+ * surviving array through four incrementally maintained indexes (composite
+ * accountId+email, email, refresh token, accountId) that apply the same
+ * tier precedence and vetoes as the linear findMatchingAccountIndex scans
+ * they replace. A newest-wins replacement re-keys every index the loser
+ * owned, so the indexes always describe the current survivor array.
+ */
 function deduplicateAccountsByIdentityPass<T extends AccountLike>(
 	accounts: readonly T[],
 ): T[] {
 	const deduplicated: T[] = [];
+	const refs: AccountIdentityRef[] = [];
+	const compositeIndexes = new Map<string, DedupNewestIndex>();
+	const emailIndexes = new Map<string, DedupEmailIndex>();
+	const refreshIndexes = new Map<string, DedupRefreshIndex>();
+	const accountIdOwners = new Map<string, Set<number>>();
+
+	const addToIndexes = (
+		index: number,
+		account: T,
+		ref: AccountIdentityRef,
+	): void => {
+		const compositeKey = dedupCompositeKey(ref);
+		if (compositeKey !== undefined) {
+			let newest = compositeIndexes.get(compositeKey);
+			if (!newest) {
+				newest = new DedupNewestIndex();
+				compositeIndexes.set(compositeKey, newest);
+			}
+			newest.set(index, account);
+		}
+		if (ref.emailKey !== undefined) {
+			let bucket = emailIndexes.get(ref.emailKey);
+			if (!bucket) {
+				bucket = { newest: new DedupNewestIndex(), accountIds: new Map() };
+				emailIndexes.set(ref.emailKey, bucket);
+			}
+			bucket.newest.set(index, account);
+			bumpIdentityCount(bucket.accountIds, ref.accountId, 1);
+		}
+		if (ref.refreshToken !== undefined) {
+			let bucket = refreshIndexes.get(ref.refreshToken);
+			if (!bucket) {
+				bucket = {
+					newest: new DedupNewestIndex(),
+					accountIds: new Map(),
+					emailKeys: new Map(),
+				};
+				refreshIndexes.set(ref.refreshToken, bucket);
+			}
+			bucket.newest.set(index, account);
+			bumpIdentityCount(bucket.accountIds, ref.accountId, 1);
+			bumpIdentityCount(bucket.emailKeys, ref.emailKey, 1);
+		}
+		if (ref.accountId !== undefined) {
+			let owners = accountIdOwners.get(ref.accountId);
+			if (!owners) {
+				owners = new Set();
+				accountIdOwners.set(ref.accountId, owners);
+			}
+			owners.add(index);
+		}
+	};
+
+	const removeFromIndexes = (index: number, ref: AccountIdentityRef): void => {
+		const compositeKey = dedupCompositeKey(ref);
+		if (compositeKey !== undefined) {
+			compositeIndexes.get(compositeKey)?.delete(index);
+		}
+		if (ref.emailKey !== undefined) {
+			const bucket = emailIndexes.get(ref.emailKey);
+			if (bucket) {
+				bucket.newest.delete(index);
+				bumpIdentityCount(bucket.accountIds, ref.accountId, -1);
+			}
+		}
+		if (ref.refreshToken !== undefined) {
+			const bucket = refreshIndexes.get(ref.refreshToken);
+			if (bucket) {
+				bucket.newest.delete(index);
+				bumpIdentityCount(bucket.accountIds, ref.accountId, -1);
+				bumpIdentityCount(bucket.emailKeys, ref.emailKey, -1);
+			}
+		}
+		if (ref.accountId !== undefined) {
+			accountIdOwners.get(ref.accountId)?.delete(index);
+		}
+	};
+
 	for (const account of accounts) {
 		if (!account) continue;
-		const existingIndex = findMatchingAccountIndex(deduplicated, account);
+		const candidateRef = toAccountIdentityRef(account);
+		let existingIndex: number | undefined;
+
+		// Tier 1: composite accountId + email match.
+		if (candidateRef.accountId && candidateRef.emailKey) {
+			const compositeKey = dedupCompositeKey(candidateRef);
+			if (compositeKey !== undefined) {
+				existingIndex = compositeIndexes.get(compositeKey)?.newestIndex();
+			}
+		}
+
+		// Tier 2: safe email match. Refuse when the email's owners plus the
+		// candidate carry more than one distinct accountId.
+		if (existingIndex === undefined && candidateRef.emailKey) {
+			const bucket = emailIndexes.get(candidateRef.emailKey);
+			if (bucket && bucket.newest.size > 0) {
+				const distinctAccountIds =
+					bucket.accountIds.size +
+					(candidateRef.accountId &&
+					!bucket.accountIds.has(candidateRef.accountId)
+						? 1
+						: 0);
+				if (distinctAccountIds <= 1) {
+					existingIndex = bucket.newest.newestIndex();
+				}
+			}
+		}
+
+		// Tier 3: compatible refresh-token match. Refuse on an owner whose
+		// accountId or emailKey conflicts with the candidate's, and on an
+		// ambiguous refresh-only candidate with more than one owner.
+		if (existingIndex === undefined && candidateRef.refreshToken) {
+			const bucket = refreshIndexes.get(candidateRef.refreshToken);
+			if (bucket && bucket.newest.size > 0) {
+				const accountIdConflict =
+					candidateRef.accountId !== undefined &&
+					(bucket.accountIds.size > 1 ||
+						(bucket.accountIds.size === 1 &&
+							!bucket.accountIds.has(candidateRef.accountId)));
+				const emailKeyConflict =
+					candidateRef.emailKey !== undefined &&
+					(bucket.emailKeys.size > 1 ||
+						(bucket.emailKeys.size === 1 &&
+							!bucket.emailKeys.has(candidateRef.emailKey)));
+				const ambiguous =
+					candidateRef.accountId === undefined &&
+					candidateRef.emailKey === undefined &&
+					bucket.newest.size > 1;
+				if (!accountIdConflict && !emailKeyConflict && !ambiguous) {
+					existingIndex = bucket.newest.newestIndex();
+				}
+			}
+		}
+
+		// Tier 4: unique-accountId fallback. The dedup pass runs
+		// findMatchingAccountIndex with default options, so the fallback is
+		// only reachable for candidates that also carry an email key; a sole
+		// owner still loses on a conflicting email key.
+		if (
+			existingIndex === undefined &&
+			candidateRef.accountId &&
+			candidateRef.emailKey
+		) {
+			const owners = accountIdOwners.get(candidateRef.accountId);
+			if (owners && owners.size === 1) {
+				const only = owners.values().next();
+				if (!only.done) {
+					const ownerEmailKey = refs[only.value]?.emailKey;
+					if (
+						ownerEmailKey === undefined ||
+						ownerEmailKey === candidateRef.emailKey
+					) {
+						existingIndex = only.value;
+					}
+				}
+			}
+		}
+
 		if (existingIndex === undefined) {
+			const index = deduplicated.length;
 			deduplicated.push(account);
+			refs.push(candidateRef);
+			addToIndexes(index, account, candidateRef);
 			continue;
 		}
-		deduplicated[existingIndex] = selectNewestAccount(
-			deduplicated[existingIndex],
-			account,
-		);
+
+		const current = deduplicated[existingIndex];
+		if (selectNewestAccount(current, account) === current) continue;
+		deduplicated[existingIndex] = account;
+		const previousRef = refs[existingIndex];
+		refs[existingIndex] = candidateRef;
+		if (previousRef) removeFromIndexes(existingIndex, previousRef);
+		addToIndexes(existingIndex, account, candidateRef);
 	}
 	return deduplicated;
 }
