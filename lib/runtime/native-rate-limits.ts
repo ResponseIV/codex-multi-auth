@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, promises as fs } from 'node:fs';
+import { accessSync, constants, existsSync, promises as fs, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, join } from 'node:path';
 import { codexCliAccountIdFor } from '../auth/token-utils.js';
@@ -27,7 +27,13 @@ export function resolveNativeUsageCommand(platform:NodeJS.Platform=process.platf
   '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
   '/Applications/ChatGPT.app/Contents/Resources/codex',
  ];
- if(platform==='darwin'){const executable=bundled.find(path=>existsSync(path));if(executable)return [executable];}
+ if(platform==='darwin'){
+  const executable=bundled.find(path=>{
+   try{if(!statSync(path).isFile())return false;accessSync(path,constants.X_OK);return true;}
+   catch{return false;}
+  });
+  if(executable)return [executable];
+ }
  try{return [process.execPath,createRequire(import.meta.url).resolve('@openai/codex/bin/codex.js')];}
  catch{throw Error('Native usage backend unavailable; set CODEX_MULTI_AUTH_USAGE_CODEX_BIN to the native Codex executable');}
 }

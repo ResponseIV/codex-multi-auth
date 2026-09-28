@@ -841,7 +841,9 @@ failure.
 - Reset-credit checks detect both current and previous ChatGPT desktop backend
   layouts on macOS. `check resets` and `resets list --refresh` exit 1 and report
   failed reads when any eligible account cannot be refreshed; successful rows
-  still appear. No npm scripts or storage migrations were added for this fix.
+  still appear. Bundled candidates must be executable files. Ambiguous duplicate
+  account identities are shown as unverified and cannot authorize reset operations.
+  No npm scripts or storage migrations were added for this fix.
 
 - `codex-multi-auth limits` adds a machine-readable quota contract. It requires
   `--json`, emits schema version 1, defaults to zero-network cached mode, and
@@ -1069,9 +1071,12 @@ Last-resort mode first rechecks all eligible subscription workspaces. It spends 
 
 `check resets` and `resets list --refresh` report how many eligible accounts
 could not be read and exit 1 on a partial or complete refresh failure. A
-successful read with an unavailable count remains `unknown`, not zero.
+successful read with an unavailable count remains `unknown`, not zero. Duplicate
+record/workspace identities are marked ambiguous rather than sharing a cached
+count or selecting the first credential; repair duplicate imported records before
+checking or redeeming for them.
 
-The installed native Codex backend must support the earned-reset RPC methods. On macOS, discovery checks the current `ChatGPT.app/Contents/Resources/codex-cli/bin/codex` layout, then the previous `Resources/codex` layout, before the npm fallback. An explicit native executable override is available through `CODEX_MULTI_AUTH_USAGE_CODEX_BIN`. Usage reads run in a private temporary home without changing desktop login or saved workspace preferences. No refresh tokens are given to that process.
+The installed native Codex backend must support the earned-reset RPC methods. On macOS, discovery checks the current `ChatGPT.app/Contents/Resources/codex-cli/bin/codex` layout, then the previous `Resources/codex` layout, before the npm fallback, skipping candidates that are not executable files. An explicit native executable override is available through `CODEX_MULTI_AUTH_USAGE_CODEX_BIN`. Usage reads run in a private temporary home without changing desktop login or saved workspace preferences. No refresh tokens are given to that process.
 
 ### Credential-scoped access programs
 
