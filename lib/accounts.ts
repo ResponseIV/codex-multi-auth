@@ -1234,15 +1234,15 @@ export class AccountManager {
 			return { ok: false, reason: "token-exhausted" };
 		}
 
-		try {
-			getCircuitBreaker(getAccountCircuitKey(account)).canExecute();
-			return { ok: true };
-		} catch {
+		// Non-throwing probe keeps circuit-open storms off the exception path.
+		const admission = getCircuitBreaker(getAccountCircuitKey(account)).tryCanExecute();
+		if (!admission.ok) {
 			if (shouldConsumeToken) {
 				tokenTracker.refundToken(trackerKey, quotaKey);
 			}
 			return { ok: false, reason: "circuit-open" };
 		}
+		return { ok: true };
 	}
 
 	/**
