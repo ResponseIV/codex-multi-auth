@@ -828,10 +828,22 @@ interface ProcessIdentitySnapshot {
 	commandLine: string;
 }
 
+// `ps -o lstart=` is locale-sensitive: under a non-English LC_TIME it prints
+// localized day/month names that parsePosixProcessStartTime cannot read, so
+// every POSIX identity probe would fail and unbind would leak live routers.
+const POSIX_IDENTITY_PROBE_ENV: NodeJS.ProcessEnv = {
+	...process.env,
+	LC_ALL: "C",
+};
+
 async function runProcessIdentityProbe(
 	command: string,
 	args: string[],
-	options: { timeoutMs?: number; log?: (message: string) => void } = {},
+	options: {
+		timeoutMs?: number;
+		env?: NodeJS.ProcessEnv;
+		log?: (message: string) => void;
+	} = {},
 ): Promise<string | null> {
 	return new Promise((resolve) => {
 		let output = "";
@@ -862,6 +874,7 @@ async function runProcessIdentityProbe(
 			child = spawn(command, args, {
 				stdio: ["ignore", "pipe", "ignore"],
 				windowsHide: true,
+				...(options.env ? { env: options.env } : {}),
 			});
 			child.stdout?.setEncoding("utf8");
 			child.stdout?.on("data", (chunk: string) => {
@@ -928,12 +941,12 @@ async function readProcessIdentity(
 		runProcessIdentityProbe(
 			"ps",
 			["-p", String(pid), "-o", "lstart="],
-			{ log },
+			{ env: POSIX_IDENTITY_PROBE_ENV, log },
 		),
 		runProcessIdentityProbe(
 			"ps",
 			["-p", String(pid), "-o", "command="],
-			{ log },
+			{ env: POSIX_IDENTITY_PROBE_ENV, log },
 		),
 	]);
 	if (!startedAtRaw || !commandLineRaw) {
