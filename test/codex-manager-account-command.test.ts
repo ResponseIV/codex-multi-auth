@@ -25,7 +25,13 @@ function makeDeps(store: AccountPolicyStore) {
 		setStoragePath: vi.fn(),
 		loadAccounts: vi.fn(async () => makeStorage()),
 		loadPolicyStore: vi.fn(async () => store),
-		savePolicyStore: vi.fn(async () => undefined),
+		// Test seam for the mutation path: applies the caller's mutation to the
+		// fixture store the way updateAccountPolicyStore does under the lock.
+		updatePolicyStore: vi.fn(
+			async (
+				mutate: (store: AccountPolicyStore) => { result: unknown; dirty: boolean },
+			) => mutate(store).result,
+		),
 		logInfo: vi.fn(),
 		logError: vi.fn(),
 		getNow: () => 123,
@@ -46,7 +52,7 @@ describe("account command", () => {
 			paused: true,
 			updatedAt: 123,
 		});
-		expect(deps.savePolicyStore).toHaveBeenCalledTimes(2);
+		expect(deps.updatePolicyStore).toHaveBeenCalledTimes(2);
 	});
 
 	it("sets weight, drain state, and note", async () => {
@@ -118,7 +124,7 @@ describe("account command", () => {
  it.each(["-1","10","1.5","2junk",""])("rejects invalid priority %s",async(value)=>{
   const deps=makeDeps({version:1,accounts:{}});
   expect(await runAccountCommand(["priority","1",value],deps)).toBe(1);
-  expect(deps.savePolicyStore).not.toHaveBeenCalled();
+  expect(deps.updatePolicyStore).not.toHaveBeenCalled();
  });
 it("configures per-account automatic priming without enabling it for other accounts",async()=>{
  const store:AccountPolicyStore={version:1,accounts:{}};const deps=makeDeps(store);

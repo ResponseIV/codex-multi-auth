@@ -79,6 +79,42 @@ describe("budget guard", () => {
 		expect(blocked.reasons.length).toBe(3);
 	});
 
+	it("re-applies update mutations over the freshest store", async () => {
+		const {
+			loadBudgetGuardStore,
+			updateBudgetGuardStore,
+			upsertBudgetLimit,
+		} = await import("../lib/budget-guard.js");
+		// Two sequential mutations through the update path behave like two
+		// processes serialized by the lockfile: each applies on the latest
+		// committed store, so the second cannot lose the first's key.
+		await updateBudgetGuardStore((store) => ({
+			result: upsertBudgetLimit(store, { key: "a", window: "day", maxRequests: 5 }, 1),
+			dirty: true,
+		}));
+		await updateBudgetGuardStore((store) => ({
+			result: upsertBudgetLimit(store, { key: "b", window: "week", maxTokens: 9 }, 2),
+			dirty: true,
+		}));
+		const loaded = await loadBudgetGuardStore();
+		expect(loaded.limits.a).toMatchObject({ maxRequests: 5 });
+		expect(loaded.limits.b).toMatchObject({ maxTokens: 9 });
+	});
+
+	it("skips the write when a budget mutation reports no change", async () => {
+		const { getBudgetGuardPath, updateBudgetGuardStore } = await import(
+			"../lib/budget-guard.js"
+		);
+		const result = await updateBudgetGuardStore(() => ({
+			result: null,
+			dirty: false,
+		}));
+		expect(result).toBeNull();
+		await expect(fs.stat(getBudgetGuardPath())).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
+
 	it("refuses a cost budget it cannot evaluate", async () => {
 		// Unpriced models used to contribute $0, so a cost cap simply never
 		// tripped for them — `maxCostUsd` was unenforceable for every `pro` tier.

@@ -5,7 +5,14 @@ import { logWarn } from "./logger.js";
 import { getCodexMultiAuthDir } from "./runtime-paths.js";
 import type { AccountMetadataV3 } from "./storage.js";
 import { isRecord, sleep } from "./utils.js";
-import { tempPathFor } from "./temp-path.js";
+import {
+	getJsonStoreFileMtimeMs,
+	resetJsonStoreWriteQueuesForTests,
+	withJsonStoreCasRetry,
+	withJsonStoreFileLock,
+	withJsonStoreWriteQueue,
+	writeJsonStoreFileAtomicWithRetry,
+} from "./storage/json-store-lock.js";
 
 export interface AccountPolicy {
 	accountKey: string;
@@ -28,7 +35,6 @@ export interface AccountPolicyStore {
 
 const ACCOUNT_POLICY_FILE_NAME = "account-policies.json";
 const RETRYABLE_FS_CODES = new Set(["EBUSY", "EPERM"]);
-let writeQueue: Promise<void> = Promise.resolve();
 
 function isRetryableFsError(error: unknown): boolean {
 	const code = (error as NodeJS.ErrnoException | undefined)?.code;
@@ -153,46 +159,99 @@ export async function loadAccountPolicyStore(): Promise<AccountPolicyStore> {
 	}
 }
 
+/**
+ * Per-key merge of the caller's normalized store over the freshest on-disk
+ * store. Policies are keyed by the account's hashed identity (`sha256:`) and
+ * carry `updatedAt`; the newer entry wins per key so a save built on a stale
+ * snapshot cannot resurrect an older policy over a concurrent process's
+ * newer one. Keys the caller does not carry are preserved (upsert-only store
+ * — nothing deletes entries), matching the config save's
+ * patch-over-fresh-read semantics.
+ */
+function mergeAccountPolicies(
+	current: AccountPolicyStore,
+	incoming: AccountPolicyStore,
+): AccountPolicyStore {
+	const merged: AccountPolicyStore = {
+		version: 1,
+		accounts: { ...current.accounts },
+	};
+	for (const [key, policy] of Object.entries(incoming.accounts)) {
+		const existing = merged.accounts[key];
+		if (!existing || policy.updatedAt >= existing.updatedAt) {
+			merged.accounts[key] = policy;
+		}
+	}
+	return merged;
+}
+
 export async function saveAccountPolicyStore(
 	store: AccountPolicyStore,
 ): Promise<void> {
 	const path = getAccountPolicyPath();
-	const payload = normalizeStore(store);
-	const task = async (): Promise<void> => {
-		await fs.mkdir(getCodexMultiAuthDir(), { recursive: true, mode: 0o700 });
-		const tempPath = tempPathFor(path);
-		let moved = false;
-		try {
-			await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, {
-				encoding: "utf8",
-				mode: 0o600,
+	const incoming = normalizeStore(store);
+	// Per-path promise queue serializes writers inside THIS process; the
+	// lock directory closes the same window against OTHER processes. Inside the lock
+	// every attempt re-stats (CAS), re-reads the freshest on-disk store, and
+	// merges this call's entries over it — so a save that raced a concurrent
+	// write reloads-and-retries rather than blindly overwriting it.
+	await withJsonStoreWriteQueue(path, async () => {
+		await withJsonStoreFileLock(path, async () => {
+			await withJsonStoreCasRetry(async () => {
+				const expectedMtimeMs = await getJsonStoreFileMtimeMs(path);
+				const current = await loadAccountPolicyStore();
+				const merged = mergeAccountPolicies(current, incoming);
+				await fs.mkdir(getCodexMultiAuthDir(), {
+					recursive: true,
+					mode: 0o700,
+				});
+				await writeJsonStoreFileAtomicWithRetry(path, merged, {
+					expectedMtimeMs,
+					mode: 0o600,
+				});
 			});
-			for (let attempt = 0; attempt < 5; attempt += 1) {
-				try {
-					await fs.rename(tempPath, path);
-					moved = true;
-					return;
-				} catch (error) {
-					if (!isRetryableFsError(error) || attempt >= 4) throw error;
-					await sleep(10 * 2 ** attempt);
+		});
+	});
+}
+
+/**
+ * Run a policy-store read→mutate→write inside the write queue (in-process
+ * serialization) AND the cross-process lock directory, with mtime CAS retry:
+ * every attempt re-reads the freshest on-disk store and re-applies `mutate`
+ * before writing — so two commands editing DIFFERENT fields of the same
+ * policy (e.g. `weight` vs `tags`) both land, which the whole-record
+ * `updatedAt` merge in {@link saveAccountPolicyStore} cannot guarantee: a
+ * stale snapshot's record would either clobber a newer record wholesale or be
+ * discarded entirely. `mutate` must be re-appliable across retries (apply
+ * precomputed work onto the store it is handed, don't capture mutated state).
+ * Prefer this over load→upsert→save whenever the caller is mutating rather
+ * than importing a foreign store.
+ */
+export async function updateAccountPolicyStore<T>(
+	mutate: (store: AccountPolicyStore) => { result: T; dirty: boolean },
+): Promise<T> {
+	const path = getAccountPolicyPath();
+	return withJsonStoreWriteQueue(path, () =>
+		withJsonStoreFileLock(path, () =>
+			withJsonStoreCasRetry(async () => {
+				const expectedMtimeMs = await getJsonStoreFileMtimeMs(path);
+				const store = await loadAccountPolicyStore();
+				const { result, dirty } = mutate(store);
+				if (dirty) {
+					await fs.mkdir(getCodexMultiAuthDir(), {
+						recursive: true,
+						mode: 0o700,
+					});
+					await writeJsonStoreFileAtomicWithRetry(
+						path,
+						normalizeStore(store),
+						{ expectedMtimeMs, mode: 0o600 },
+					);
 				}
-			}
-		} finally {
-			if (!moved) {
-				try {
-					await fs.unlink(tempPath);
-				} catch {
-					// Best-effort temp cleanup.
-				}
-			}
-		}
-	};
-	const queued = writeQueue.catch(() => undefined).then(task);
-	writeQueue = queued.then(
-		() => undefined,
-		() => undefined,
+				return result;
+			}),
+		),
 	);
-	await queued;
 }
 
 /** Tiers are integers 0-9; anything else (including legacy absence) is tier 1. */
@@ -230,5 +289,5 @@ export function normalizeAccountPolicyTag(value: string): string | null {
 }
 
 export function resetAccountPolicyWriteQueueForTests(): void {
-	writeQueue = Promise.resolve();
+	resetJsonStoreWriteQueuesForTests(getAccountPolicyPath());
 }

@@ -146,6 +146,70 @@ describe("account policy store", () => {
 			getAccountPolicyKey({ email: "user@example.com", refreshToken: "refresh-a" }),
 		);
 	});
+
+	it("re-applies a mutation over the freshest store instead of merging whole records", async () => {
+		const {
+			getAccountPolicyPath,
+			loadAccountPolicyStore,
+			updateAccountPolicyStore,
+		} = await import("../lib/account-policy.js");
+		const key = "sha256:contended";
+		// A concurrent process already committed fields we never touched, with a
+		// much newer updatedAt than our mutation's clock — under the old
+		// whole-record updatedAt merge, our save would either clobber those
+		// fields wholesale or be silently discarded as "older".
+		await fs.writeFile(
+			getAccountPolicyPath(),
+			JSON.stringify({
+				version: 1,
+				accounts: {
+					[key]: {
+						accountKey: key,
+						tags: ["team"],
+						weight: 5,
+						paused: false,
+						drained: false,
+						note: "other writer",
+						updatedAt: 1_000_000_000_000,
+					},
+				},
+			}),
+		);
+
+		const written = await updateAccountPolicyStore((store) => ({
+			result: (() => {
+				const record = store.accounts[key]!;
+				record.paused = true;
+				return record;
+			})(),
+			dirty: true,
+		}));
+		expect(written.paused).toBe(true);
+
+		const loaded = await loadAccountPolicyStore();
+		// Our paused mutation landed AND the other fields the fresher record
+		// carried are preserved — disjoint field updates both survive.
+		expect(loaded.accounts[key]).toMatchObject({
+			tags: ["team"],
+			weight: 5,
+			paused: true,
+			note: "other writer",
+		});
+	});
+
+	it("does not write the store when the mutation reports no change", async () => {
+		const { getAccountPolicyPath, updateAccountPolicyStore } = await import(
+			"../lib/account-policy.js"
+		);
+		const result = await updateAccountPolicyStore(() => ({
+			result: "skipped",
+			dirty: false,
+		}));
+		expect(result).toBe("skipped");
+		await expect(fs.stat(getAccountPolicyPath())).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
 });
 
 
