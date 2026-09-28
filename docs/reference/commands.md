@@ -388,8 +388,18 @@ redemption stays pending under the same idempotency key — retry the same
 account explicitly. Concurrent redemptions are serialized with a five-minute
 minimum interval.
 
+`check resets` and `resets list --refresh` report how many eligible accounts
+could not be read and exit 1 on a partial or complete refresh failure. A
+successful read with an unavailable count remains `unknown`, not zero.
+Duplicate record/workspace identities are marked ambiguous rather than sharing
+a cached count or selecting the first credential; repair duplicate imported
+records before checking or redeeming for them.
+
 The installed native Codex backend must support the earned-reset RPC methods;
-`CODEX_MULTI_AUTH_USAGE_CODEX_BIN` overrides the executable. Usage reads run in
+`CODEX_MULTI_AUTH_USAGE_CODEX_BIN` overrides the executable. On macOS,
+discovery checks the current `ChatGPT.app/Contents/Resources/codex-cli/bin/codex`
+layout, then the previous `Resources/codex` layout, before the npm fallback,
+skipping candidates that are not executable files. Usage reads run in
 a private temporary home without changing the desktop login or saved workspace
 preferences, and no refresh tokens are given to that process.
 
