@@ -45,6 +45,27 @@ const JSON_STORE_READ_RETRY_CODES = new Set(["EBUSY", "EPERM", "EAGAIN"]);
 
 const JSON_STORE_CAS_MAX_ATTEMPTS = 3;
 
+/**
+ * Stamp `updatedAt` for a per-key governance entry with a hybrid logical
+ * floor: when the wall clock regressed below the timestamp the entry being
+ * overwritten already carries, stamp `prior + 1` instead of `now`. Every
+ * upsert-only store merges with `updatedAt >=`, so a backward clock jump
+ * would otherwise stamp a semantically-newer write below its own
+ * predecessor and the merge would silently drop it. Equal or forward wall
+ * times pass through unchanged — ties already resolve to the caller's
+ * write under `>=`.
+ *
+ * `prior` is the entry the writer saw, which can trail the freshest on-disk
+ * entry when a concurrent writer lands between the caller's load and its
+ * save; baseline-aware save merges re-apply this same floor against the
+ * on-disk entry at merge time so the edit still cannot be lost.
+ */
+export function stampUpdatedAt(now: number, prior: number | undefined): number {
+	return typeof prior === "number" && Number.isFinite(prior) && now < prior
+		? prior + 1
+		: now;
+}
+
 // ---------------------------------------------------------------------------
 // 1. Per-path in-process write queue
 // ---------------------------------------------------------------------------

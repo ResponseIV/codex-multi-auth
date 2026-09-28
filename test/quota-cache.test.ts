@@ -659,4 +659,75 @@ describe("quota cache", () => {
     expect((await loadQuotaCache()).byWorkspace?.personal).toEqual(entry);
   });
 
+
+  it("re-stamps a deliberate write that a backward clock jump would lose", async () => {
+    const {loadQuotaCache,saveQuotaCache} = await import("../lib/quota-cache.js");
+    const entry = (updatedAt: number, usedPercent: number) => ({updatedAt,status:200,model:"fixture",primary:{usedPercent},secondary:{}});
+    // Seed disk with an observation stamped at wall time T2.
+    await saveQuotaCache({byAccountId:{acc_1:entry(5_000,10)},byEmail:{}});
+    const baseline = await loadQuotaCache();
+    // Clock regresses to T1 < T2; the caller writes a fresh observation anyway.
+    const proposal = structuredClone(baseline);
+    proposal.byAccountId.acc_1 = entry(100,90);
+    await saveQuotaCache(proposal, baseline);
+    // The deliberate write must win the merge, re-stamped past the disk entry.
+    const final = await loadQuotaCache();
+    expect(final.byAccountId.acc_1?.primary.usedPercent).toBe(90);
+    expect(final.byAccountId.acc_1?.updatedAt).toBe(5_001);
+  });
+
+  it("does not bump an older observation over a concurrent newer one", async () => {
+    const {loadQuotaCache,saveQuotaCache} = await import("../lib/quota-cache.js");
+    const entry = (updatedAt: number, usedPercent: number) => ({updatedAt,status:200,model:"fixture",primary:{usedPercent},secondary:{}});
+    // Both probes share the same history entry.
+    await saveQuotaCache({byAccountId:{acc_1:entry(4_000,10)},byEmail:{}});
+    const baseline = await loadQuotaCache();
+    // A concurrent probe lands a NEWER observation before the slower probe saves.
+    await saveQuotaCache({byAccountId:{acc_1:entry(5_000,90)},byEmail:{}});
+    // The slow probe's deliberate write carries an older observation stamp.
+    const proposal = structuredClone(baseline);
+    proposal.byAccountId.acc_1 = entry(4_500,30);
+    await saveQuotaCache(proposal, baseline);
+    // The raced key is not the baseline entry the caller saw, so the merge
+    // must keep the newer observation instead of re-stamping the older one
+    // past it.
+    const final = await loadQuotaCache();
+    expect(final.byAccountId.acc_1?.primary.usedPercent).toBe(90);
+    expect(final.byAccountId.acc_1?.updatedAt).toBe(5_000);
+  });
+
+  it("does not bump an older observation over a concurrent one it never saw", async () => {
+    // Two probes with independent module instances (separate write queues)
+    // observe the same account; the older observation saves after the newer.
+    const first = await import("../lib/quota-cache.js");
+    vi.resetModules();
+    const second = await import("../lib/quota-cache.js");
+    const entry = (updatedAt: number, usedPercent: number) => ({updatedAt,status:200,model:"fixture",primary:{usedPercent},secondary:{}});
+    const olderBase = await first.loadQuotaCache();
+    const newerBase = await second.loadQuotaCache();
+    const newer = structuredClone(newerBase);
+    newer.byAccountId.acc_1 = entry(5_000,90);
+    const older = structuredClone(olderBase);
+    older.byAccountId.acc_1 = entry(4_000,30);
+    await second.saveQuotaCache(newer, newerBase);
+    await first.saveQuotaCache(older, olderBase);
+    const final = await first.loadQuotaCache();
+    expect(final.byAccountId.acc_1?.primary.usedPercent).toBe(90);
+    expect(final.byAccountId.acc_1?.updatedAt).toBe(5_000);
+  });
+
+  it("resolves an equal-timestamp race to the later save", async () => {
+    const {loadQuotaCache,saveQuotaCache} = await import("../lib/quota-cache.js");
+    const entry = (updatedAt: number, usedPercent: number) => ({updatedAt,status:200,model:"fixture",primary:{usedPercent},secondary:{}});
+    await saveQuotaCache({byAccountId:{acc_1:entry(5_000,10)},byEmail:{}});
+    const baseline = await loadQuotaCache();
+    // A concurrent writer lands a different observation at the SAME stamp.
+    await saveQuotaCache({byAccountId:{acc_1:entry(5_000,90)},byEmail:{}});
+    const proposal = structuredClone(baseline);
+    proposal.byAccountId.acc_1 = entry(5_000,30);
+    await saveQuotaCache(proposal, baseline);
+    // Ties keep the `>=` winner semantics: the later save wins.
+    expect((await loadQuotaCache()).byAccountId.acc_1?.primary.usedPercent).toBe(30);
+  });
+
 });

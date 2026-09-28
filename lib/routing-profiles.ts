@@ -11,6 +11,7 @@ import { isRecord, sleep } from "./utils.js";
 import {
 	getJsonStoreFileMtimeMs,
 	resetJsonStoreWriteQueuesForTests,
+	stampUpdatedAt,
 	withJsonStoreCasRetry,
 	withJsonStoreFileLock,
 	withJsonStoreWriteQueue,
@@ -178,29 +179,54 @@ export async function loadRoutingProfileStore(): Promise<RoutingProfileStore> {
  * concurrent process's newer one. Keys the caller does not carry are
  * preserved (upsert-only store — nothing deletes entries), matching the
  * config save's patch-over-fresh-read semantics.
+ *
+ * When `baseline` (the caller's pre-edit snapshot) is supplied, entries
+ * identical to it are untouched carried copies and skipped entirely, so a
+ * stale snapshot row can never be re-stamped over a raced write. Entries
+ * that differ are deliberate writes and must not lose purely on timestamp:
+ * the upsert-time floor stamps against the caller's snapshot, but a
+ * concurrent writer can land a still-newer entry before this merge runs, so
+ * the merge re-stamps against the freshest on-disk entry instead of
+ * silently dropping the edit. Without a baseline every supplied entry is a
+ * plain `updatedAt >=` upsert.
  */
 function mergeRoutingProfiles(
 	current: RoutingProfileStore,
 	incoming: RoutingProfileStore,
+	baseline: RoutingProfileStore | undefined,
 ): RoutingProfileStore {
 	const merged: RoutingProfileStore = {
 		version: 1,
 		profiles: Object.assign(newProfilesMap(), current.profiles),
 	};
+	const same = (
+		a: RoutingProfile | undefined,
+		b: RoutingProfile | undefined,
+	): boolean => JSON.stringify(a) === JSON.stringify(b);
 	for (const [key, profile] of Object.entries(incoming.profiles)) {
 		const existing = merged.profiles[key];
-		if (!existing || profile.updatedAt >= existing.updatedAt) {
-			merged.profiles[key] = profile;
+		if (!baseline) {
+			if (!existing || profile.updatedAt >= existing.updatedAt) {
+				merged.profiles[key] = profile;
+			}
+			continue;
 		}
+		if (same(profile, baseline.profiles[key])) continue;
+		profile.updatedAt = stampUpdatedAt(profile.updatedAt, existing?.updatedAt);
+		merged.profiles[key] = profile;
 	}
 	return merged;
 }
 
 export async function saveRoutingProfileStore(
 	store: RoutingProfileStore,
+	baseline?: RoutingProfileStore,
 ): Promise<void> {
 	const path = getRoutingProfilesPath();
 	const incoming = normalizeStore(store);
+	// Normalize at invocation like `incoming`: later caller-side mutation of
+	// `baseline` must not shift which entries the merge counts as deliberate.
+	const prior = baseline ? normalizeStore(baseline) : undefined;
 	// Per-path promise queue serializes writers inside THIS process; the
 	// lock directory closes the same window against OTHER processes. Inside the lock
 	// every attempt re-stats (CAS), re-reads the freshest on-disk store, and
@@ -211,7 +237,7 @@ export async function saveRoutingProfileStore(
 			await withJsonStoreCasRetry(async () => {
 				const expectedMtimeMs = await getJsonStoreFileMtimeMs(path);
 				const current = await loadRoutingProfileStore();
-				const merged = mergeRoutingProfiles(current, incoming);
+				const merged = mergeRoutingProfiles(current, incoming, prior);
 				await fs.mkdir(getCodexMultiAuthDir(), {
 					recursive: true,
 					mode: 0o700,
@@ -296,7 +322,7 @@ export function upsertRoutingProfile(
 		: undefined;
 	const next = structuredClone(existing ?? profile);
 	mutate?.(next);
-	next.updatedAt = now;
+	next.updatedAt = stampUpdatedAt(now, existing?.updatedAt);
 	const normalized = normalizeProfile(profile.projectKey, next);
 	if (!normalized) throw new Error("Invalid routing profile");
 	Object.defineProperty(store.profiles, profile.projectKey, {

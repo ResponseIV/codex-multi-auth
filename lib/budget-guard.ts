@@ -7,6 +7,7 @@ import { isRecord, sleep } from "./utils.js";
 import {
 	getJsonStoreFileMtimeMs,
 	resetJsonStoreWriteQueuesForTests,
+	stampUpdatedAt,
 	withJsonStoreCasRetry,
 	withJsonStoreFileLock,
 	withJsonStoreWriteQueue,
@@ -179,27 +180,54 @@ export async function loadBudgetGuardStore(): Promise<BudgetGuardStore> {
  * concurrent process's newer one. Keys the caller does not carry are
  * preserved (upsert-only store — nothing deletes entries), matching the
  * config save's patch-over-fresh-read semantics.
+ *
+ * When `baseline` (the caller's pre-edit snapshot) is supplied, entries
+ * identical to it are untouched carried copies and skipped entirely, so a
+ * stale snapshot row can never be re-stamped over a raced write. Entries
+ * that differ are deliberate writes and must not lose purely on timestamp:
+ * the upsert-time floor stamps against the caller's snapshot, but a
+ * concurrent writer can land a still-newer entry before this merge runs, so
+ * the merge re-stamps against the freshest on-disk entry instead of
+ * silently dropping the edit. Without a baseline every supplied entry is a
+ * plain `updatedAt >=` upsert.
  */
 function mergeBudgetGuardLimits(
 	current: BudgetGuardStore,
 	incoming: BudgetGuardStore,
+	baseline: BudgetGuardStore | undefined,
 ): BudgetGuardStore {
 	const merged: BudgetGuardStore = {
 		version: 1,
 		limits: Object.assign(newLimitsMap(), current.limits),
 	};
+	const same = (
+		a: BudgetLimit | undefined,
+		b: BudgetLimit | undefined,
+	): boolean => JSON.stringify(a) === JSON.stringify(b);
 	for (const [key, limit] of Object.entries(incoming.limits)) {
 		const existing = merged.limits[key];
-		if (!existing || limit.updatedAt >= existing.updatedAt) {
-			merged.limits[key] = limit;
+		if (!baseline) {
+			if (!existing || limit.updatedAt >= existing.updatedAt) {
+				merged.limits[key] = limit;
+			}
+			continue;
 		}
+		if (same(limit, baseline.limits[key])) continue;
+		limit.updatedAt = stampUpdatedAt(limit.updatedAt, existing?.updatedAt);
+		merged.limits[key] = limit;
 	}
 	return merged;
 }
 
-export async function saveBudgetGuardStore(store: BudgetGuardStore): Promise<void> {
+export async function saveBudgetGuardStore(
+	store: BudgetGuardStore,
+	baseline?: BudgetGuardStore,
+): Promise<void> {
 	const path = getBudgetGuardPath();
 	const incoming = normalizeStore(store);
+	// Normalize at invocation like `incoming`: later caller-side mutation of
+	// `baseline` must not shift which entries the merge counts as deliberate.
+	const prior = baseline ? normalizeStore(baseline) : undefined;
 	// Per-path promise queue serializes writers inside THIS process; the
 	// lock directory closes the same window against OTHER processes. Inside the lock
 	// every attempt re-stats (CAS), re-reads the freshest on-disk store, and
@@ -210,7 +238,7 @@ export async function saveBudgetGuardStore(store: BudgetGuardStore): Promise<voi
 			await withJsonStoreCasRetry(async () => {
 				const expectedMtimeMs = await getJsonStoreFileMtimeMs(path);
 				const current = await loadBudgetGuardStore();
-				const merged = mergeBudgetGuardLimits(current, incoming);
+				const merged = mergeBudgetGuardLimits(current, incoming, prior);
 				await fs.mkdir(getCodexMultiAuthDir(), {
 					recursive: true,
 					mode: 0o700,
@@ -269,7 +297,11 @@ export function upsertBudgetLimit(
 ): BudgetLimit {
 	const key = normalizeKey(limit.key);
 	if (!key) throw new Error("Budget key is required");
-	const next = normalizeLimit(key, { ...limit, key, updatedAt: now });
+	const next = normalizeLimit(key, {
+		...limit,
+		key,
+		updatedAt: stampUpdatedAt(now, store.limits[key]?.updatedAt),
+	});
 	if (!next) throw new Error("Invalid budget limit");
 	writeLimitEntry(store.limits, key, next);
 	return next;
