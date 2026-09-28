@@ -8,6 +8,7 @@ import { isRecord, sleep } from "./utils.js";
 import {
 	getJsonStoreFileMtimeMs,
 	resetJsonStoreWriteQueuesForTests,
+	stampUpdatedAt,
 	withJsonStoreCasRetry,
 	withJsonStoreFileLock,
 	withJsonStoreWriteQueue,
@@ -167,29 +168,54 @@ export async function loadAccountPolicyStore(): Promise<AccountPolicyStore> {
  * newer one. Keys the caller does not carry are preserved (upsert-only store
  * — nothing deletes entries), matching the config save's
  * patch-over-fresh-read semantics.
+ *
+ * When `baseline` (the caller's pre-edit snapshot) is supplied, entries
+ * identical to it are untouched carried copies and skipped entirely, so a
+ * stale snapshot row can never be re-stamped over a raced write. Entries
+ * that differ are deliberate writes and must not lose purely on timestamp:
+ * the upsert-time floor stamps against the caller's snapshot, but a
+ * concurrent writer can land a still-newer entry before this merge runs, so
+ * the merge re-stamps against the freshest on-disk entry instead of
+ * silently dropping the edit. Without a baseline every supplied entry is a
+ * plain `updatedAt >=` upsert.
  */
 function mergeAccountPolicies(
 	current: AccountPolicyStore,
 	incoming: AccountPolicyStore,
+	baseline: AccountPolicyStore | undefined,
 ): AccountPolicyStore {
 	const merged: AccountPolicyStore = {
 		version: 1,
 		accounts: { ...current.accounts },
 	};
+	const same = (
+		a: AccountPolicy | undefined,
+		b: AccountPolicy | undefined,
+	): boolean => JSON.stringify(a) === JSON.stringify(b);
 	for (const [key, policy] of Object.entries(incoming.accounts)) {
 		const existing = merged.accounts[key];
-		if (!existing || policy.updatedAt >= existing.updatedAt) {
-			merged.accounts[key] = policy;
+		if (!baseline) {
+			if (!existing || policy.updatedAt >= existing.updatedAt) {
+				merged.accounts[key] = policy;
+			}
+			continue;
 		}
+		if (same(policy, baseline.accounts[key])) continue;
+		policy.updatedAt = stampUpdatedAt(policy.updatedAt, existing?.updatedAt);
+		merged.accounts[key] = policy;
 	}
 	return merged;
 }
 
 export async function saveAccountPolicyStore(
 	store: AccountPolicyStore,
+	baseline?: AccountPolicyStore,
 ): Promise<void> {
 	const path = getAccountPolicyPath();
 	const incoming = normalizeStore(store);
+	// Normalize at invocation like `incoming`: later caller-side mutation of
+	// `baseline` must not shift which entries the merge counts as deliberate.
+	const prior = baseline ? normalizeStore(baseline) : undefined;
 	// Per-path promise queue serializes writers inside THIS process; the
 	// lock directory closes the same window against OTHER processes. Inside the lock
 	// every attempt re-stats (CAS), re-reads the freshest on-disk store, and
@@ -200,7 +226,7 @@ export async function saveAccountPolicyStore(
 			await withJsonStoreCasRetry(async () => {
 				const expectedMtimeMs = await getJsonStoreFileMtimeMs(path);
 				const current = await loadAccountPolicyStore();
-				const merged = mergeAccountPolicies(current, incoming);
+				const merged = mergeAccountPolicies(current, incoming, prior);
 				await fs.mkdir(getCodexMultiAuthDir(), {
 					recursive: true,
 					mode: 0o700,
@@ -279,7 +305,7 @@ export function upsertAccountPolicy(
 	next.weight = normalizeWeight(next.weight);
 	next.priority = normalizePriority(next.priority);
 	next.autoPrime = next.autoPrime === true;
-	next.updatedAt = now;
+	next.updatedAt = stampUpdatedAt(now, store.accounts[accountKey]?.updatedAt);
 	store.accounts[accountKey] = next;
 	return next;
 }

@@ -187,4 +187,182 @@ describe("routing profiles", () => {
 			(await loadRoutingProfileStore()).profiles["__proto__"]?.projectName,
 		).toBe("proto-key");
 	});
+
+	it("survives a backward clock jump between writes (hybrid updatedAt floor)", async () => {
+		const {
+			createDefaultRoutingProfile,
+			loadRoutingProfileStore,
+			resolveProjectRoutingProfile,
+			saveRoutingProfileStore,
+			upsertRoutingProfile,
+		} = await import("../lib/routing-profiles.js");
+
+		const { projectKey, identityRoot } = await resolveProjectRoutingProfile(projectDir);
+
+		// First write lands at wall time T2.
+		const first = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			first,
+			createDefaultRoutingProfile({
+				projectKey: projectKey!,
+				projectName: "project",
+				identityRoot: identityRoot!,
+				now: 5_000,
+			}),
+			(next) => {
+				next.preferredTags.push("before");
+			},
+			5_000,
+		);
+		await saveRoutingProfileStore(first);
+
+		// Clock regresses to T1 < T2; the reloaded store carries the T2 stamp,
+		// so the upsert clamps forward instead of losing the merge.
+		const reloaded = await loadRoutingProfileStore();
+		const mutated = upsertRoutingProfile(
+			reloaded,
+			reloaded.profiles[projectKey!]!,
+			(next) => {
+				next.preferredTags.push("after");
+			},
+			100,
+		);
+		expect(mutated.updatedAt).toBe(5_001);
+		await saveRoutingProfileStore(reloaded);
+
+		const final = await loadRoutingProfileStore();
+		// normalizeProfile sorts tags; the skewed write must still be present.
+		expect(final.profiles[projectKey!]?.preferredTags).toEqual(["after", "before"]);
+		expect(final.profiles[projectKey!]?.updatedAt).toBe(5_001);
+	});
+
+	it("does not lose a deliberate profile edit that races a concurrent write under clock skew", async () => {
+		const {
+			createDefaultRoutingProfile,
+			loadRoutingProfileStore,
+			resolveProjectRoutingProfile,
+			saveRoutingProfileStore,
+			upsertRoutingProfile,
+		} = await import("../lib/routing-profiles.js");
+
+		const { projectKey, identityRoot } = await resolveProjectRoutingProfile(projectDir);
+
+		// Seed the profile at wall time T2.
+		const seed = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			seed,
+			createDefaultRoutingProfile({
+				projectKey: projectKey!,
+				projectName: "project",
+				identityRoot: identityRoot!,
+				now: 5_000,
+			}),
+			(next) => {
+				next.preferredTags.push("base");
+			},
+			5_000,
+		);
+		await saveRoutingProfileStore(seed);
+
+		// This writer loads its snapshot BEFORE the concurrent write lands.
+		const working = await loadRoutingProfileStore();
+		const baseline = structuredClone(working);
+
+		// A concurrent writer lands a newer entry first.
+		const raced = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			raced,
+			raced.profiles[projectKey!]!,
+			(next) => {
+				next.preferredTags.push("raced");
+			},
+			7_000,
+		);
+		await saveRoutingProfileStore(raced);
+
+		// Clock regresses to T1 << T2: the snapshot floor stamps 5_001, below
+		// the raced on-disk 7_000 — the merge must re-floor against the fresh
+		// disk entry or this edit is silently dropped.
+		const mutated = upsertRoutingProfile(
+			working,
+			working.profiles[projectKey!]!,
+			(next) => {
+				next.avoidTags.push("slow");
+			},
+			100,
+		);
+		expect(mutated.updatedAt).toBe(5_001);
+		await saveRoutingProfileStore(working, baseline);
+
+		const final = await loadRoutingProfileStore();
+		expect(final.profiles[projectKey!]?.avoidTags).toEqual(["slow"]);
+		expect(final.profiles[projectKey!]?.updatedAt).toBe(7_001);
+		// Same-key conflicts are whole-entry last-writer-wins: the landed
+		// profile carries this writer's view (["base"]), not the raced write's.
+		expect(final.profiles[projectKey!]?.preferredTags).toEqual(["base"]);
+	});
+
+	it("leaves a raced newer profile alone when the caller only carried it", async () => {
+		const {
+			createDefaultRoutingProfile,
+			loadRoutingProfileStore,
+			resolveProjectRoutingProfile,
+			saveRoutingProfileStore,
+			upsertRoutingProfile,
+		} = await import("../lib/routing-profiles.js");
+
+		const otherDir = join(tempDir, "project-b");
+		await fs.mkdir(otherDir, { recursive: true });
+		await fs.writeFile(join(otherDir, "package.json"), "{}", "utf8");
+		const edited = await resolveProjectRoutingProfile(projectDir);
+		const carried = await resolveProjectRoutingProfile(otherDir);
+
+		const seed = await loadRoutingProfileStore();
+		for (const ctx of [edited, carried]) {
+			upsertRoutingProfile(
+				seed,
+				createDefaultRoutingProfile({
+					projectKey: ctx.projectKey!,
+					projectName: "project",
+					identityRoot: ctx.identityRoot!,
+					now: 5_000,
+				}),
+				undefined,
+				5_000,
+			);
+		}
+		await saveRoutingProfileStore(seed);
+
+		const working = await loadRoutingProfileStore();
+		const baseline = structuredClone(working);
+
+		// A concurrent writer moves ONLY the carried profile to a newer entry.
+		const raced = await loadRoutingProfileStore();
+		upsertRoutingProfile(
+			raced,
+			raced.profiles[carried.projectKey!]!,
+			(next) => {
+				next.preferredTags.push("raced");
+			},
+			9_000,
+		);
+		await saveRoutingProfileStore(raced);
+
+		// The caller edits only the other profile; the carried snapshot copy
+		// must not be re-stamped over the raced write.
+		upsertRoutingProfile(
+			working,
+			working.profiles[edited.projectKey!]!,
+			(next) => {
+				next.avoidTags.push("slow");
+			},
+			100,
+		);
+		await saveRoutingProfileStore(working, baseline);
+
+		const final = await loadRoutingProfileStore();
+		expect(final.profiles[edited.projectKey!]?.avoidTags).toEqual(["slow"]);
+		expect(final.profiles[carried.projectKey!]?.preferredTags).toEqual(["raced"]);
+		expect(final.profiles[carried.projectKey!]?.updatedAt).toBe(9_000);
+	});
 });

@@ -209,6 +209,19 @@ function mergeQuotaChanges(current: QuotaCacheData, proposed: QuotaCacheData, ba
 				if (!latest || update.updatedAt >= latest.updatedAt) {
 					current[namespace] ??= {};
 					current[namespace][key] = update;
+				} else if (same(latest, before[key])) {
+					// The on-disk entry is still exactly the one this caller's
+					// baseline saw, so nothing concurrent touched this key:
+					// `update` is a deliberate write whose lower stamp can only
+					// come from a backward clock jump on this writer. Re-stamp
+					// it just ahead instead of silently losing it. A raced key
+					// (`!same`) falls through and keeps the on-disk entry: its
+					// higher stamp marks a newer observation, and bumping an
+					// older one past it would let stale quota data overwrite
+					// fresher data.
+					update.updatedAt = latest.updatedAt + 1;
+					current[namespace] ??= {};
+					current[namespace][key] = update;
 				}
 			} else if (same(latest, before[key])) {
 				delete current[namespace]?.[key];
