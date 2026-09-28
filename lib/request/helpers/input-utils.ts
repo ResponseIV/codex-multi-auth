@@ -174,12 +174,15 @@ const convertOrphanedOutputToMessage = (
 			? ((item as { name?: string }).name as string)
 			: "tool";
 	const labelCallId = callId ?? "unknown";
+	// Read `.output` once: the catch fallback must use the same value —
+	// re-reading a throwing getter inside the catch would just re-throw.
+	const out = (item as { output?: unknown }).output;
 	let text: string;
 	try {
-		const out = (item as { output?: unknown }).output;
-		text = typeof out === "string" ? out : JSON.stringify(out);
+		text =
+			typeof out === "string" ? out : (JSON.stringify(out) ?? "");
 	} catch {
-		text = String((item as { output?: unknown }).output ?? "");
+		text = String(out ?? "");
 	}
 	if (text.length > 16000) {
 		text = text.slice(0, 16000) + "\n...[truncated]";

@@ -121,43 +121,50 @@ const TOOL_OUTPUT_TYPES = new Set([
 	"custom_tool_call_output",
 ]);
 
-const arbInputItem = fc
-	.record({
-		id: fc.option(fc.string({ minLength: 1, maxLength: 24 }), {
-			nil: undefined,
-		}),
-		type: fc.constantFrom(
-			"message",
-			"function_call",
-			"function_call_output",
-			"item_reference",
-			"local_shell_call",
-			"local_shell_call_output",
-			"custom_tool_call",
-			"custom_tool_call_output",
-			"reasoning",
+const arbInputItem = fc.record({
+	id: fc.option(fc.string({ minLength: 1, maxLength: 24 }), {
+		nil: undefined,
+	}),
+	type: fc.constantFrom(
+		"message",
+		"function_call",
+		"function_call_output",
+		"item_reference",
+		"local_shell_call",
+		"local_shell_call_output",
+		"custom_tool_call",
+		"custom_tool_call_output",
+		"reasoning",
+	),
+	role: fc.constantFrom("user", "assistant", "system", "developer"),
+	content: fc.option(arbMessageContent, { nil: undefined }),
+	call_id: fc.option(fc.string({ minLength: 1, maxLength: 12 }), {
+		nil: undefined,
+	}),
+	name: fc.option(fc.string({ maxLength: 16 }), { nil: undefined }),
+	// Non-string outputs are deliberate: orphaned *_output rows are JSON-stringified
+	// by convertOrphanedOutputToMessage (previously a crash on absent/undefined
+	// output — see the pinned regression below), so the property should keep
+	// generating them.
+	output: fc.option(
+		fc.oneof(
+			fc.string({ maxLength: 80 }),
+			fc.integer(),
+			fc.boolean(),
+			fc.constant(null),
+			fc.dictionary(
+				fc.string({ maxLength: 8 }),
+				fc.string({ maxLength: 8 }),
+				{ maxKeys: 3 },
+			),
+			fc.array(fc.integer(), { maxLength: 4 }),
 		),
-		role: fc.constantFrom("user", "assistant", "system", "developer"),
-		content: fc.option(arbMessageContent, { nil: undefined }),
-		call_id: fc.option(fc.string({ minLength: 1, maxLength: 12 }), {
-			nil: undefined,
-		}),
-		name: fc.option(fc.string({ maxLength: 16 }), { nil: undefined }),
-		output: fc.option(fc.string({ maxLength: 80 }), { nil: undefined }),
-		phase: fc.option(fc.constantFrom("commentary", "final_answer"), {
-			nil: undefined,
-		}),
-	})
-	.map((item) =>
-		// KNOWN BUG (pinned below with it.fails): an orphaned *_output item
-		// without a string `output` crashes convertOrphanedOutputToMessage via
-		// JSON.stringify(undefined) → undefined.length. Keep generated outputs
-		// string-typed so the round-trip properties exercise the rest of the
-		// transformer instead of re-discovering that single defect every run.
-		TOOL_OUTPUT_TYPES.has(item.type) && typeof item.output !== "string"
-			? { ...item, output: item.output ?? "" }
-			: item,
-	);
+		{ nil: undefined },
+	),
+	phase: fc.option(fc.constantFrom("commentary", "final_answer"), {
+		nil: undefined,
+	}),
+});
 
 const arbJsonSchema = fc.record(
 	{
@@ -849,12 +856,11 @@ describe("transformRequestBody properties", () => {
 	// REAL BUG, pinned loudly: lib/request/helpers/input-utils.ts
 	// convertOrphanedOutputToMessage computes
 	//   text = typeof out === "string" ? out : JSON.stringify(out)
-	// inside a try/catch, but JSON.stringify(undefined) returns undefined —
-	// the subsequent `text.length` then throws TypeError OUTSIDE the guard.
-	// Any orphaned function/local-shell/custom-tool output without a string
-	// output crashes transformRequestBody (and silently aborts
-	// transformRequestForCodex via its catch → undefined).
-	it.fails(
+	// sat inside a try/catch, but JSON.stringify(undefined) returns undefined —
+	// the subsequent `text.length` threw TypeError OUTSIDE the guard. Now
+	// guarded with `?? ""`: orphaned outputs without a string output no longer
+	// crash transformRequestBody.
+	it(
 		"orphaned tool outputs without a string output must not crash transformRequestBody",
 		async () => {
 			for (const type of [
@@ -862,17 +868,30 @@ describe("transformRequestBody properties", () => {
 				"local_shell_call_output",
 				"custom_tool_call_output",
 			] as const) {
-				await expect(
-					transformRequestBody(
+				// Absent output (the original crash: JSON.stringify(undefined) →
+				// undefined.length) plus the JSON-representable non-string shapes.
+				for (const output of [
+					undefined,
+					null,
+					42,
+					true,
+					{ nested: "value" },
+					[1, 2],
+				] as const) {
+					const result = await transformRequestBody(
 						{
 							model: "gpt-5.5",
-							input: [{ type, call_id: "orphan-call-id" }],
+							input: [{ type, call_id: "orphan-call-id", output }],
 						} as RequestBody,
 						CODEX_INSTRUCTIONS,
 						{ global: {}, models: {} },
 						false,
-					),
-				).resolves.toBeDefined();
+					);
+					expect(result).toBeDefined();
+					expect(
+						result.input?.some((item) => item.type === "message"),
+					).toBe(true);
+				}
 			}
 		},
 	);
