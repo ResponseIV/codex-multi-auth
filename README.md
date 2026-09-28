@@ -52,7 +52,7 @@ codex-multi-auth check
 codex-multi-auth forecast --live
 ```
 
-Headless or remote shell? Use `codex-multi-auth login --device-auth` — no callback port needed. Blocked browser? See [alternate login paths](docs/getting-started.md#alternate-login-paths).
+Headless or remote shell? Use `codex-multi-auth login --device-auth` — no callback port needed. Blocked browser? See [alternate login paths](docs/getting-started.md#log-in).
 
 Run Codex through the wrapper so requests rotate across the pool:
 

@@ -43,7 +43,7 @@ Dashboard display settings (`dashboardDisplaySettings` in the same `settings.jso
 | Unified settings | `<multi-auth root>/settings.json` | `pluginConfig` + `dashboardDisplaySettings`; a `.bak` sibling is kept for recovery |
 | Optional config file | `CODEX_MULTI_AUTH_CONFIG_PATH=<path>` | Standalone config source and save target |
 | Global account pool | `<multi-auth root>/openai-codex-accounts.json` | Managed OAuth accounts |
-| Per-project pools | `<multi-auth root>/projects/<project-key>/` | Project-scoped accounts when `perProjectAccounts` is on |
+| Per-project pools | `<multi-auth root>/projects/<project-key>/` | Project-scoped accounts when `perProjectAccounts` is on and CLI sync is off |
 | Official Codex state | `~/.codex/auth.json`, `~/.codex/accounts.json`, `~/.codex/config.toml` | Synced by `CODEX_MULTI_AUTH_SYNC_CODEX_CLI`; paths overridable via `CODEX_CLI_*_PATH` |
 
 Full path reference: [reference/storage-paths.md](reference/storage-paths.md).
@@ -178,7 +178,7 @@ When you drive many agents in parallel (for example a swarm of deep agents), eac
 - `retryAllAccountsRateLimited` (default `false`), with `retryAllAccountsMaxRetries` (default `0`) and `retryAllAccountsMaxWaitMs` (default `0`): when every account is momentarily rate-limited, wait for the soonest quota window and retry instead of returning pool-exhaustion immediately. Keep the retry/wait budgets bounded so a blocking wait does not exceed the host client's own request timeout.
 - `routingMutex` (default `legacy`, env `CODEX_AUTH_ROUTING_MUTEX`): set to `enabled` to serialize account selection *within a single process*. It has no effect across separate agent processes.
 
-The structural fix is more accounts: with N accounts and M ≫ N concurrent agents, roughly `M/N` agents share each account, so rate-limit pressure only drops as N grows. See [High parallelism / swarms of agents](troubleshooting.md#high-parallelism--swarms-of-agents) for the full playbook, including the host-client-side `Provider response headers timed out after 10000ms` timeout (which this plugin cannot change).
+The structural fix is more accounts: with N accounts and M ≫ N concurrent agents, roughly `M/N` agents share each account, so rate-limit pressure only drops as N grows. See [High parallelism / swarms of agents](troubleshooting.md#high-parallelism--agent-swarms) for the full playbook, including the host-client-side `Provider response headers timed out after 10000ms` timeout (which this plugin cannot change).
 
 Microsoft/Outlook SSO accounts may be more sensitive to proxy-mediated token use. If an Outlook-linked account is invalidated on every first request through the proxy but works normally on ChatGPT web, the root cause is likely IP or device binding on the Microsoft side. Raising `CODEX_AUTH_TOKEN_INVALIDATION_COOLDOWN_MS` and re-logging in the affected account typically resolves the cascade. If the problem persists, consider excluding the Microsoft account from the rotation pool via `codex-multi-auth switch`.
 

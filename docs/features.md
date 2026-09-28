@@ -90,7 +90,7 @@ Paused and drained accounts are skipped during proxy selection — these are enf
 | --- | --- |
 | Storage V3 | Canonical pool format; older layouts migrate on first load |
 | Local root | `~/.codex/multi-auth`, overridable with `CODEX_MULTI_AUTH_DIR` |
-| Per-project pools | On by default — each repo gets its own pool under `projects/<project-key>/` |
+| Per-project pools | `perProjectAccounts` defaults on but applies only when Codex CLI sync is off (`CODEX_MULTI_AUTH_SYNC_CODEX_CLI=0`) — under the default sync, wrapper sessions and manager commands both use the global pool. When active, each repo gets its own pool under `projects/<project-key>/` |
 | Worktree identity | Linked worktrees share their repository's pool |
 | Codex CLI sync | The active account mirrors into `~/.codex/auth.json` so plain `codex` uses it too |
 

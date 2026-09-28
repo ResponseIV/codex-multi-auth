@@ -23,6 +23,8 @@
 | Runtime observability | `~/.codex/multi-auth/runtime-observability.json` | Local request counters; feeds `status`/`report` |
 | Usage ledger | `~/.codex/multi-auth/usage/usage-ledger.jsonl` | Redacted request metadata: hashed account/email identifiers, no prompts, no auth headers |
 | Account policies | `~/.codex/multi-auth/account-policies.json` | Tags, weights, pause/drain, notes — keyed by hashed account identity |
+| API routes | `~/.codex/multi-auth/api-routes.json` | Optional non-OAuth route definitions; holds raw `apiKey` values — treat as credential material |
+| Reset credits | `~/.codex/multi-auth/reset-credits.json` | Reset-credit availability snapshots, keyed by account identity |
 | Budget guards | `~/.codex/multi-auth/budget-guards.json` | Local request/token/cost limits |
 | Routing profiles | `~/.codex/multi-auth/routing-profiles.json` | Project-aware preferences, keyed by project identity |
 | Bridge client tokens | `~/.codex/multi-auth/local-client-tokens.json` | SHA-256 hashes + prefixes only; plaintext `cma_local_*` tokens show once at creation |
@@ -72,55 +74,78 @@ Optional debug logging:
 
 ## Data Cleanup
 
-`codex-multi-auth uninstall --clear-accounts` wipes stored credentials as part of a full uninstall. For a manual wipe, delete the files below (adjust for `CODEX_MULTI_AUTH_DIR` if you override the root):
+`codex-multi-auth uninstall --clear-accounts` wipes stored credentials as part of a full uninstall. For a manual wipe, run the recipe below — it resolves the same root the code does (`CODEX_MULTI_AUTH_DIR`, then `$CODEX_HOME/multi-auth`, then `~/.codex/multi-auth`) and deletes only the artifacts multi-auth owns, so an override pointing at a shared directory leaves unrelated files alone. Run `codex-multi-auth verify --paths` first to see the resolved root — with no overrides, an existing install under `~/DevTools/config/codex/multi-auth` (or very old installs storing files directly in `~/.codex`) is preferred over an empty `~/.codex/multi-auth`:
 
 ```bash
-rm -f ~/.codex/multi-auth/settings.json
-rm -f ~/.codex/multi-auth/openai-codex-accounts.json
-rm -f ~/.codex/multi-auth/openai-codex-flagged-accounts.json
-rm -f ~/.codex/multi-auth/quota-cache.json
-rm -f ~/.codex/multi-auth/runtime-observability.json
-rm -f ~/.codex/multi-auth/first-run-setup.json
-rm -f ~/.codex/multi-auth/config.json
-rm -f ~/.codex/multi-auth/account-policies.json
-rm -f ~/.codex/multi-auth/routing-profiles.json
-rm -f ~/.codex/multi-auth/budget-guards.json
-rm -f ~/.codex/multi-auth/local-client-tokens.json
-rm -rf ~/.codex/multi-auth/refresh-leases
-rm -rf ~/.codex/multi-auth/usage
-rm -rf ~/.codex/multi-auth/backups
-rm -rf ~/.codex/multi-auth/projects
-rm -f ~/.codex/multi-auth/runtime-rotation-app-helper*.json
-rm -rf ~/.codex/multi-auth/app-bind
-rm -rf ~/.codex/multi-auth/logs/codex-plugin
-rm -rf ~/.codex/multi-auth/cache
-# Override roots (only if the variables are set):
-[ -n "${CODEX_MULTI_AUTH_DIR:-}" ] && rm -rf "$CODEX_MULTI_AUTH_DIR"
+# If verify --paths reported a different root, set ROOT to that path instead.
+ROOT="${CODEX_MULTI_AUTH_DIR:-${CODEX_HOME:-$HOME/.codex}/multi-auth}"
+rm -rf "$ROOT"/openai-codex-accounts.json*          # pool + .wal/.bak.*/.pending-auth/.lock sidecars
+rm -rf "$ROOT"/codex-accounts.json*                 # legacy pool filename (pre-rename installs)
+rm -rf "$ROOT"/openai-codex-flagged-accounts.json*
+rm -rf "$ROOT"/openai-codex-blocked-accounts.json*  # legacy flagged filename
+rm -rf "$ROOT"/settings.json*
+rm -rf "$ROOT"/quota-cache.json*
+rm -rf "$ROOT"/runtime-observability.json*
+rm -f "$ROOT/first-run-setup.json"
+rm -rf "$ROOT"/config.json*
+rm -rf "$ROOT"/dashboard-settings.json*
+rm -rf "$ROOT"/account-policies.json*
+rm -rf "$ROOT"/routing-profiles.json*
+rm -rf "$ROOT"/budget-guards.json*
+rm -rf "$ROOT"/local-client-tokens.json*
+rm -rf "$ROOT"/api-routes.json*
+rm -rf "$ROOT"/reset-credits.json*
+rm -rf "$ROOT"/api-capability-probes.json*
+rm -rf "$ROOT"/model-discovery.json*
+rm -rf "$ROOT/refresh-leases"
+rm -rf "$ROOT/usage"
+rm -rf "$ROOT/backups"
+rm -rf "$ROOT/projects"
+rm -f "$ROOT"/runtime-rotation-app-helper*.json
+rm -rf "$ROOT/app-bind"
+rm -rf "$ROOT/inference-activity"
+rm -rf "$ROOT/logs"                               # audit.log rotations + codex-plugin request logs
+rm -rf "$ROOT/cache"
+rm -rf "$ROOT/tmp"
+rm -f "$ROOT/.gitignore"
+# Standalone config override (only if set):
 [ -n "${CODEX_MULTI_AUTH_CONFIG_PATH:-}" ] && rm -f "$CODEX_MULTI_AUTH_CONFIG_PATH"
 ```
 
 ```powershell
-Remove-Item "$HOME\.codex\multi-auth\settings.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\openai-codex-accounts.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\openai-codex-flagged-accounts.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\quota-cache.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\runtime-observability.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\first-run-setup.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\config.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\account-policies.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\routing-profiles.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\budget-guards.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\local-client-tokens.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\refresh-leases" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\usage" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\backups" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\projects" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\runtime-rotation-app-helper*.json" -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\app-bind" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\logs\codex-plugin" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item "$HOME\.codex\multi-auth\cache" -Recurse -Force -ErrorAction SilentlyContinue
-# Override roots (only if the variables are set):
-if ($env:CODEX_MULTI_AUTH_DIR) { Remove-Item "$env:CODEX_MULTI_AUTH_DIR" -Recurse -Force -ErrorAction SilentlyContinue }
+# If verify --paths reported a different root, set $root to that path instead.
+$root = $env:CODEX_MULTI_AUTH_DIR
+if (-not $root) { $root = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME "multi-auth" } else { "$HOME\.codex\multi-auth" } }
+Remove-Item "$root\openai-codex-accounts.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\codex-accounts.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\openai-codex-flagged-accounts.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\openai-codex-blocked-accounts.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\settings.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\quota-cache.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\runtime-observability.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\first-run-setup.json" -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\config.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\dashboard-settings.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\account-policies.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\routing-profiles.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\budget-guards.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\local-client-tokens.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\api-routes.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\reset-credits.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\api-capability-probes.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\model-discovery.json*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\refresh-leases" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\usage" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\backups" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\projects" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\runtime-rotation-app-helper*.json" -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\app-bind" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\inference-activity" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\logs" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\cache" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\tmp" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$root\.gitignore" -Force -ErrorAction SilentlyContinue
+# Standalone config override (only if set):
 if ($env:CODEX_MULTI_AUTH_CONFIG_PATH) { Remove-Item "$env:CODEX_MULTI_AUTH_CONFIG_PATH" -Force -ErrorAction SilentlyContinue }
 ```
 

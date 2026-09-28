@@ -104,7 +104,7 @@ Package version: 2.17.2
 | Quota | `lib/quota-probe.ts`, `lib/quota-cache.ts`, `lib/quota-readiness.ts`, `lib/runtime/quota-headers.ts` | probe chain, persisted snapshots, account-ref normalization/readiness, `x-codex-*` header parsing |
 | Token refresh | `lib/refresh-queue.ts`, `lib/refresh-lease.ts`, `lib/refresh-guardian.ts`, `lib/proactive-refresh.ts` | in-process dedup queue; cross-process leases (`<multi-auth>/refresh-leases/`); guardian+proactive are plugin-host only |
 | Session affinity | `lib/session-affinity.ts` | session→account map (TTL 20m, 512 LRU) keyed from session/conversation headers → prompt_cache_key → previous_response_id → metadata |
-| Routing mutex | `lib/routing-mutex.ts` | optional serialized select+commit (`CODEX_MULTI_AUTH_ROUTING_MUTEX=enabled`; default `legacy`) |
+| Routing mutex | `lib/routing-mutex.ts` | optional serialized select+commit (`CODEX_AUTH_ROUTING_MUTEX=enabled`; default `legacy`) |
 | Preemptive quota | `lib/preemptive-quota-scheduler.ts`, `lib/runtime/preemptive-quota.ts` | defers near-exhausted accounts using `x-codex-*` quota snapshots (≥95% used; max deferral 2h) |
 | Automatic checks | `lib/runtime/automatic-account-checks.ts`, `lib/runtime/automatic-subscription-checks.ts` | periodic quota/account refresh (15-min interval, 5s initial delay) |
 | Reset credits | `lib/runtime/reset-credits.ts`, `lib/runtime/reset-credit-routing.ts`, `lib/runtime/account-reset-credits.ts` | earned reset-credit snapshots + unpinned recovery routing |
@@ -178,7 +178,7 @@ Package version: 2.17.2
 ```bash
 npm run build            # tsc + copy oauth-success.html
 npm run typecheck        # type checking only
-npm run typecheck:scripts# tsc -p tsconfig.scripts.json (JS check)
+npm run typecheck:scripts # tsc -p tsconfig.scripts.json (JS check)
 npm test                 # vitest once (--maxWorkers=1)
 npm run test:coverage    # vitest with coverage report
 npm run lint             # eslint (ts + scripts)
