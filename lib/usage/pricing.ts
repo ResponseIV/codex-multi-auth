@@ -1,4 +1,7 @@
-import { RETIRED_MODEL_REPLACEMENTS } from "../request/helpers/model-map.js";
+import {
+	getNormalizedModel,
+	RETIRED_MODEL_REPLACEMENTS,
+} from "../request/helpers/model-map.js";
 import type { UsageServiceTier, UsageTokenCounts } from "./types.js";
 
 export interface UsageModelPricing {
@@ -239,7 +242,13 @@ export function getUsageModelPricing(
 	// the ledger stores `costUsd` when a row is written and never re-prices it.
 	const effective = !/^(api|zdr)\//.test(model ?? "") && Object.hasOwn(RETIRED_MODEL_REPLACEMENTS, normalized)
 		? RETIRED_MODEL_REPLACEMENTS[normalized]
-		: normalized;
+		: // Bare aliases (`gpt-6.1`, `gpt-6`, `gpt-5.6`, `astra`) and
+			// effort-suffixed ids (`gpt-6.1-sol-max`) reach the ledger raw too;
+			// `getNormalizedModel` is the exact/alias-only resolver — NOT
+			// `resolveNormalizedModel`, which hands back DEFAULT_MODEL for
+			// anything unrecognized and would price an unknown model at the
+			// default's rate.
+			(getNormalizedModel(normalized) ?? normalized);
 	if (!effective || !Object.hasOwn(MODEL_PRICING, effective)) {
 		return null;
 	}

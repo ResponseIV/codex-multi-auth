@@ -65,7 +65,7 @@ Package version: 2.17.3
 | Standalone CLI entry | `scripts/codex-multi-auth.js` | `codex-multi-auth` bin; `--version`, arg normalization, dynamic import of `dist/lib/codex-manager.js` (needs `npm run build`) |
 | CLI dispatcher | `lib/codex-manager.ts`, `lib/codex-manager/account-manager-commands.ts` | `runCodexMultiAuthCli`: first-run setup → auth-prefix normalization → 31-command handler map; mutating commands pin the GLOBAL pool via `setStoragePath(null)` |
 | Command modules | `lib/codex-manager/commands/` (25), `lib/codex-manager/login-flow.ts`, `lib/codex-manager/repair-commands.ts` | `login`, `verify-flagged`/`fix`/`doctor`, `list`/`status`/`features` live outside `commands/` |
-| Wrapper forwarding | `scripts/codex.js` (~6.6k lines) | `codex-multi-auth-codex ...`: auth args → local manager; everything else → resolved official Codex binary with runtime-proxy context, shadow CODEX_HOME, ≤4 spawn attempts |
+| Wrapper forwarding | `scripts/codex.js` (~6.6k lines) | `codex-multi-auth-codex ...`: auth args → local manager; everything else → resolved official Codex binary with runtime-proxy context, shadow CODEX_HOME, ≤5 spawn attempts |
 | Compatibility aliases | `scripts/codex-routing.js` | `multi auth`/`multi-auth`/`multiauth` argv aliases normalize to `auth` before dispatch |
 | Convenience launcher | `scripts/mcodex.js` | `mcodex` bin: forwards to `codex.js`; optional `--monitor` / `--tmux` helpers; no account logic |
 | Official Codex binary discovery | `scripts/codex-bin-resolver.js` | `CODEX_MULTI_AUTH_REAL_CODEX_BIN` (absolute-only) → @openai/codex require.resolve → prefix roots → npm root -g → PATH |

@@ -446,6 +446,29 @@ describe("unsupported-model fallback chain", () => {
 		expect(secondCandidate("gpt-6-astra-aeon", ["gpt-6-astra"])).toBeUndefined();
 	});
 
+	it("keeps every live entry's staircase inside the wrapper's five-forward bound", () => {
+		// scripts/codex.js `forwardToRealCodex` spawns at most 5 times: the
+		// initial request plus four unsupported-model retries — the same bound
+		// the plugin host's outbound attempt budget uses. Every live model's
+		// walk is four hops, so the staircase's terminal model is reachable on
+		// the last allowed spawn; a deeper row would strand the tail on the
+		// wrapper path even though the chain table admits it.
+		for (const entry of [
+			"gpt-6.1-sol",
+			"gpt-6-astra",
+			"gpt-6-sol",
+			"gpt-6-luna",
+			"gpt-5.6-sol",
+			"gpt-5.6-luna",
+			"gpt-5.6-terra",
+		]) {
+			expect(walk(entry).length).toBeLessThanOrEqual(4);
+		}
+		// The deepest legacy alias still reaches the broadest-availability rung
+		// inside the same bound: its fourth hop lands on `gpt-6-luna`.
+		expect(walk("gpt-5-pro").slice(0, 4).at(-1)).toBe("gpt-6-luna");
+	});
+
 	it("walks every general model down the same staircase", () => {
 		expect(walk("gpt-5.6-terra")).toEqual([
 			"gpt-5.6-sol",

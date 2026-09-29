@@ -2077,7 +2077,11 @@ async function forwardToRealCodex(codexBin, rawArgs, baseEnv = process.env) {
 	let lastExitCode = 1;
 	const attemptedModels = new Set();
 
-	for (let attempt = 0; attempt < 4; attempt += 1) {
+	// Five forwards: the deepest supported-model staircase (gpt-6.1-sol ->
+	// gpt-6-sol -> gpt-5.6-sol -> gpt-6-luna -> gpt-5.6-luna) spends exactly
+	// the shared per-request attempt budget of 5 the plugin host uses. With 4
+	// the terminal model was unreachable from the new default.
+	for (let attempt = 0; attempt < 5; attempt += 1) {
 		const requestedModel = extractRequestedModel(currentArgs);
 		if (requestedModel) {
 			attemptedModels.add(requestedModel);
