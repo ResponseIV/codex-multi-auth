@@ -61,7 +61,7 @@ export {
  * diagnostics all agree on the same effective model.
  *
  * @param model - Original model name (e.g., "gpt-5-codex-low", "openai/gpt-5.3-codex")
- * @returns Normalized model name (e.g., "gpt-5.3-codex", "gpt-5.5", "gpt-5.4")
+ * @returns Normalized model name (e.g., "gpt-5.6-sol", "gpt-6.1-sol", "gpt-6-astra")
  */
 export function normalizeModel(model: string | undefined): string {
 	return resolveNormalizedModel(model);

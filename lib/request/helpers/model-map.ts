@@ -115,21 +115,23 @@ export const CURRENT_CODEX_MODEL = "gpt-5.6-sol";
  * `gpt-5.1-codex-mini`, rather than up to Sol.
  */
 const CODEX_MINI_REPLACEMENT_MODEL = "gpt-5.6-terra";
-export const DEFAULT_MODEL = "gpt-5.5";
+
+// The default tracks whatever upstream defaults a fresh Codex session to:
+// `gpt-6.1-sol` entered the bundled catalog on 2026-09-29 as priority 1
+// (openai/codex #49318), above Astra. `gpt-5.5`, the previous default here,
+// retires from ChatGPT/Codex on 2026-10-14, so keeping it would have landed
+// every unresolvable request — and the legacy `gpt-5` alias — on a dying id.
+export const DEFAULT_MODEL = "gpt-6.1-sol";
 
 // Model used for diagnostic live/quota probes (`check`, `report`, `best`).
 // Deliberately distinct from DEFAULT_MODEL: GPT-5.6 is the latest general family
-// (issue #627), so the probe leads with it, while DEFAULT_MODEL stays on 5.5 so
-// actual request routing and the legacy `gpt-5` alias remain opt-in per 2.5.0.
+// (issue #627) with a year of rollout behind it, so the probe leads with it —
+// a probe only needs a response's quota headers, and leading with a fresh
+// launch model (Astra on 2026-09-03, 6.1 Sol on 2026-09-29) spends one failed
+// request per probe on every account not yet entitled and buys nothing. Move
+// DEFAULT_PROBE_MODEL forward once a newer model is broadly available.
 // Bare `gpt-5.6` aliases to Sol; we pin the canonical id so the probe display
 // and report `modelSelection` read `gpt-5.6-sol` without a remap arrow.
-//
-// GPT-6 Astra deliberately does NOT lead the probe as of its 2026-09-03 launch.
-// A probe only needs a response's quota headers, and Astra is still rolling out
-// org by org, so leading with it would spend one failed request per probe for
-// every account without entitlement yet and buy nothing. Move DEFAULT_PROBE_MODEL
-// to `gpt-6-astra` once it is broadly available, and put `gpt-5.6-sol` directly
-// behind it in QUOTA_PROBE_MODEL_CHAIN.
 export const DEFAULT_PROBE_MODEL = "gpt-5.6-sol";
 
 // Single source of truth for the live/quota probe fallback chain. Both the
@@ -181,17 +183,16 @@ const GPT_5_6_LUNA_EFFORTS = [
 /**
  * GPT-6 Astra, OpenAI's 2026-09-03 frontier release.
  *
- * The launch lineup was the flagship plus `aeon`, a long-horizon variant built
- * for runs measured in days; Sol and Luna followed on 2026-09-22 (below).
- * `gpt-6-astra` is the API model name OpenAI published at launch;
- * `gpt-6-astra-aeon` is the second slug that shipped beside it in the Codex
- * model list. "Astra Pro" is a plan tier, not a separate slug we have seen, so
- * it is deliberately not registered as its own canonical model — the GPT-6
- * resolver below claims `gpt-6-astra-pro` and every other unrecognised GPT-6 id
- * for the flagship rather than letting it fall through to GPT-5.5.
+ * Sol and Luna followed on 2026-09-22 (below). `gpt-6-astra` is the API model
+ * name OpenAI published at launch. The long-horizon `gpt-6-astra-aeon` slug
+ * that leaked beside it never appeared in the bundled catalog or the public
+ * model docs and is retired below — its ids now alias the flagship. "Astra
+ * Pro" is a plan tier, not a separate slug we have seen, so it is deliberately
+ * not registered as its own canonical model — the GPT-6 resolver below claims
+ * `gpt-6-astra-pro` and every other unrecognised GPT-6 id for the flagship
+ * rather than letting it fall through to the default.
  */
 const GPT_6_ASTRA_MODEL = "gpt-6-astra";
-const GPT_6_ASTRA_AEON_MODEL = "gpt-6-astra-aeon";
 
 /** Bare `gpt-6` resolves to the flagship, mirroring bare `gpt-5.6` -> Sol. */
 const GPT_6_FLAGSHIP_ALIAS = "gpt-6";
@@ -233,6 +234,23 @@ const GPT_6_LUNA_EFFORTS = [
 ] as const satisfies readonly ModelReasoningEffort[];
 
 /**
+ * GPT-6.1 Sol, the first 6.1 release: added to the upstream catalog on
+ * 2026-09-29 (openai/codex #49318) as the default model — priority 1, above
+ * Astra — with "near-Astra performance at a lower cost". The same commit
+ * demoted `gpt-6-sol` to "previous generation workhorse". The catalog ships
+ * the full low..ultra ladder with a `low` default (the API model page
+ * documents `medium` for direct-API callers; the Codex catalog this wrapper
+ * mirrors says `low`). Sol is the only 6.1 tier yet, so bare `gpt-6.1` and
+ * any unrecognised 6.1 id resolve to it, matching the bare-alias convention.
+ */
+const GPT_6_1_SOL_MODEL = "gpt-6.1-sol";
+
+/** Bare `gpt-6.1` resolves to Sol — the only tier OpenAI ships at 6.1. */
+const GPT_6_1_FLAGSHIP_ALIAS = "gpt-6.1";
+
+const GPT_6_1_SOL_EFFORTS = GPT_6_ASTRA_EFFORTS;
+
+/**
  * Cyber-specialty models from the upstream Codex catalog
  * (openai/codex `codex-rs/models-manager/models.json`).
  *
@@ -255,19 +273,14 @@ const DAYBREAK_EFFORTS = [
 	"ultra",
 ] as const satisfies readonly ModelReasoningEffort[];
 
-const GPT_5_5_CANONICAL_MODEL = "gpt-5.5";
-const GPT_5_5_PRO_CANONICAL_MODEL = "gpt-5.5-pro";
-const GPT_5_5_RELEASE_MODEL = "gpt-5.5-2026-04-23";
-const GPT_5_5_PRO_RELEASE_MODEL = "gpt-5.5-pro-2026-04-23";
-const GPT_5_5_RELEASE_COMPAT_MODEL = "gpt-5.5-20260423";
-const GPT_5_5_PRO_RELEASE_COMPAT_MODEL = "gpt-5.5-pro-20260423";
-
 /**
- * Where an unrecognised `gpt-5.<minor>` id lands. Every minor below 5.5 is
- * retired (OpenAI deprecations page, upstream catalog removals), so each maps
- * to the replacement OpenAI names for it rather than to a model that no longer
- * answers: 5.1/5.2 to Sol, 5.4 to GPT-6 Sol/Luna as upstream Codex migrates it,
- * and every `pro` to the one live pro model.
+ * Where an unrecognised `gpt-5.<minor>` id lands. Every known minor is
+ * retired (OpenAI deprecations page, upstream catalog removals, the
+ * 2026-10-14 `gpt-5.5` OAuth shutdown), so each maps to the replacement
+ * OpenAI names for it rather than to a model that no longer answers:
+ * 5.1/5.2 to Sol, 5.4 to GPT-6 Sol/Luna as upstream Codex migrates it,
+ * 5.5 to GPT-6 Sol likewise, and every `pro` to the frontier flagship that
+ * replaced the API-only `gpt-5.5-pro`.
  */
 const GENERAL_GPT5_VERSION_CATALOG: Record<
 	GeneralGpt5KnownMinor,
@@ -275,33 +288,45 @@ const GENERAL_GPT5_VERSION_CATALOG: Record<
 > = {
 	1: {
 		base: GPT_5_6_SOL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 	},
 	2: {
 		base: GPT_5_6_SOL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 	},
 	4: {
 		base: GPT_6_SOL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 		mini: GPT_6_LUNA_MODEL,
 		nano: GPT_6_LUNA_MODEL,
 	},
 	5: {
-		base: GPT_5_5_CANONICAL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		base: GPT_6_SOL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 		mini: GPT_5_6_TERRA_MODEL,
 		nano: GPT_5_6_LUNA_MODEL,
 	},
 };
 
-const GENERAL_GPT5_STABLE_VARIANTS = GENERAL_GPT5_VERSION_CATALOG[5];
+/**
+ * Landing spot for a `gpt-5.<minor>` whose minor this catalog does not know
+ * (a `gpt-5.7` or `gpt-5.9` id, say): the newest generation the 5.x line
+ * still serves. Deliberately NOT the migration target `gpt-6-sol` — an id
+ * naming a 5.x minor keeps its generation, the same way every known minor
+ * above lands on a living 5.x or the replacement OpenAI actually named.
+ */
+const GENERAL_GPT5_STABLE_VARIANTS: Record<GeneralGpt5Variant, string> = {
+	base: GPT_5_6_SOL_MODEL,
+	pro: GPT_6_ASTRA_MODEL,
+	mini: GPT_5_6_TERRA_MODEL,
+	nano: GPT_5_6_LUNA_MODEL,
+};
 
 // `gpt-5-mini`/`gpt-5-nano` point at snapshots OpenAI retires on 2026-12-11;
 // the deprecations page names Terra and Luna as their replacements.
 const GENERAL_GPT5_GENERIC_VARIANTS: Record<GeneralGpt5Variant, string> = {
-	base: DEFAULT_MODEL,
-	pro: GPT_5_5_PRO_CANONICAL_MODEL,
+	base: GPT_5_6_SOL_MODEL,
+	pro: GPT_6_ASTRA_MODEL,
 	mini: GPT_5_6_TERRA_MODEL,
 	nano: GPT_5_6_LUNA_MODEL,
 };
@@ -328,11 +353,11 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
 		supportedReasoningEfforts: GPT_6_ASTRA_EFFORTS,
 		capabilities: TOOL_CAPABILITIES.full,
 	},
-	[GPT_6_ASTRA_AEON_MODEL]: {
-		normalizedModel: GPT_6_ASTRA_AEON_MODEL,
+	[GPT_6_1_SOL_MODEL]: {
+		normalizedModel: GPT_6_1_SOL_MODEL,
 		promptFamily: "gpt-5.2",
-		defaultReasoningEffort: "medium",
-		supportedReasoningEfforts: GPT_6_ASTRA_EFFORTS,
+		defaultReasoningEffort: "low",
+		supportedReasoningEfforts: GPT_6_1_SOL_EFFORTS,
 		capabilities: TOOL_CAPABILITIES.full,
 	},
 	[GPT_6_SOL_MODEL]: {
@@ -387,26 +412,15 @@ export const MODEL_PROFILES: Record<string, ModelProfile> = {
 		supportedReasoningEfforts: GPT_5_6_LUNA_EFFORTS,
 		capabilities: TOOL_CAPABILITIES.full,
 	},
-	[GPT_5_5_CANONICAL_MODEL]: {
-		normalizedModel: GPT_5_5_CANONICAL_MODEL,
-		promptFamily: "gpt-5.2",
-		defaultReasoningEffort: "none",
-		supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
-		capabilities: TOOL_CAPABILITIES.full,
-	},
-	[GPT_5_5_PRO_CANONICAL_MODEL]: {
-		normalizedModel: GPT_5_5_PRO_CANONICAL_MODEL,
-		promptFamily: "gpt-5.2",
-		defaultReasoningEffort: "high",
-		supportedReasoningEfforts: ["medium", "high", "xhigh"],
-		capabilities: TOOL_CAPABILITIES.computerAndCompact,
-	},
-	// Every model older than 5.5 is retired: `gpt-5.1`, `gpt-5.2` and the whole
-	// 5.4 family left the upstream Codex catalog, the codex models and the
-	// chat-latest snapshots are past their shutdown date on OpenAI's
-	// deprecations page, and `gpt-5-mini`/`gpt-5-nano` shut down 2026-12-11.
-	// Their ids stay accepted as aliases of the named replacement (below) so an
-	// old config keeps working, but no request is sent under a dead name.
+	// 5.5 and older are all retired: `gpt-5.5` leaves ChatGPT/Codex on
+	// 2026-10-14, `gpt-5.5-pro` left the bundled Codex catalog earlier (it is
+	// API-only now, which this OAuth surface cannot serve), `gpt-5.1`,
+	// `gpt-5.2` and the whole 5.4 family left the upstream Codex catalog, the
+	// codex models and the chat-latest snapshots are past their shutdown date
+	// on OpenAI's deprecations page, and `gpt-5-mini`/`gpt-5-nano` shut down
+	// 2026-12-11. Their ids stay accepted as aliases of the named replacement
+	// (below) so an old config keeps working, but no request is sent under a
+	// dead name.
 } as const;
 
 const MODEL_MAP: Record<string, string> = {};
@@ -457,24 +471,28 @@ function addGpt56Aliases(): void {
 function addGpt6Aliases(): void {
 	addEffortAliases(GPT_6_ASTRA_MODEL, GPT_6_ASTRA_MODEL, GPT_6_ASTRA_EFFORTS);
 	addEffortAliases(
-		GPT_6_ASTRA_AEON_MODEL,
-		GPT_6_ASTRA_AEON_MODEL,
-		GPT_6_ASTRA_EFFORTS,
-	);
-	addEffortAliases(
 		GPT_6_FLAGSHIP_ALIAS,
 		GPT_6_ASTRA_MODEL,
 		GPT_6_ASTRA_EFFORTS,
 	);
 	// `astra` on its own is how the model is spoken about everywhere; accept it
-	// rather than letting it fall through to GPT-5.5.
+	// rather than letting it fall through to the default.
 	addEffortAliases("astra", GPT_6_ASTRA_MODEL, GPT_6_ASTRA_EFFORTS);
-	addEffortAliases("astra-aeon", GPT_6_ASTRA_AEON_MODEL, GPT_6_ASTRA_EFFORTS);
+	// `astra-aeon` was only ever a leaked slug and is retired now, so the name
+	// resolves to the flagship it was a variant of. Its `gpt-6-astra-aeon`
+	// form comes from the retired table, not from a dedicated registration.
+	addEffortAliases("astra-aeon", GPT_6_ASTRA_MODEL, GPT_6_ASTRA_EFFORTS);
 	// No bare `sol`/`luna` aliases: those names already mean the 5.6 tiers to
 	// anyone who used them before 2026-09-22, and re-pointing them would swap a
 	// user's model generation without asking.
 	addEffortAliases(GPT_6_SOL_MODEL, GPT_6_SOL_MODEL, GPT_6_SOL_EFFORTS);
 	addEffortAliases(GPT_6_LUNA_MODEL, GPT_6_LUNA_MODEL, GPT_6_LUNA_EFFORTS);
+	addEffortAliases(GPT_6_1_SOL_MODEL, GPT_6_1_SOL_MODEL, GPT_6_1_SOL_EFFORTS);
+	addEffortAliases(
+		GPT_6_1_FLAGSHIP_ALIAS,
+		GPT_6_1_SOL_MODEL,
+		GPT_6_1_SOL_EFFORTS,
+	);
 }
 
 function addDaybreakAliases(): void {
@@ -485,26 +503,12 @@ function addDaybreakAliases(): void {
 }
 
 function addGeneralAliases(): void {
-	addReasoningAliases(GPT_5_5_CANONICAL_MODEL, GPT_5_5_CANONICAL_MODEL);
-	addReasoningAliases(GPT_5_5_RELEASE_MODEL, GPT_5_5_CANONICAL_MODEL);
-	addReasoningAliases(
-		GPT_5_5_RELEASE_COMPAT_MODEL,
-		GPT_5_5_CANONICAL_MODEL,
-	);
-	addReasoningAliases(
-		GPT_5_5_PRO_CANONICAL_MODEL,
-		GPT_5_5_PRO_CANONICAL_MODEL,
-	);
-	addReasoningAliases(
-		GPT_5_5_PRO_RELEASE_MODEL,
-		GPT_5_5_PRO_CANONICAL_MODEL,
-	);
-	addReasoningAliases(
-		GPT_5_5_PRO_RELEASE_COMPAT_MODEL,
-		GPT_5_5_PRO_CANONICAL_MODEL,
-	);
-	addReasoningAliases("gpt-5-pro", GPT_5_5_PRO_CANONICAL_MODEL);
-	addReasoningAliases("gpt-5", DEFAULT_MODEL);
+	// `gpt-5` and `gpt-5-pro` are the last un-versioned ids upstream published.
+	// With 5.5 retired, "the gpt-5 line" is Sol 5.6 and "the pro tier" is the
+	// Astra flagship that replaced the API-only `gpt-5.5-pro`. The dated and
+	// pro-suffixed forms of 5.5 itself come from the retired table below.
+	addReasoningAliases("gpt-5-pro", GPT_6_ASTRA_MODEL);
+	addReasoningAliases("gpt-5", GPT_5_6_SOL_MODEL);
 }
 
 /**
@@ -516,12 +520,27 @@ function addGeneralAliases(): void {
  * efforts the replacement does not accept are coerced as for any request.
  */
 const RETIRED_GENERAL_MODEL_REPLACEMENTS: Readonly<Record<string, string>> = {
+	// `gpt-6-astra-aeon` never appeared in the bundled Codex catalog or the
+	// public model docs — it existed only as a Statsig-flag leak — so the id
+	// is dead and goes to the flagship it was a long-horizon variant of.
+	"gpt-6-astra-aeon": GPT_6_ASTRA_MODEL,
+	// `gpt-5.5` leaves ChatGPT/Codex OAuth on 2026-10-14; the bundled catalog
+	// already relabels it "legacy" and names GPT-6 Sol as the migration
+	// target. `gpt-5.5-pro` left the bundled catalog earlier — it is API-only
+	// now, a surface this OAuth wrapper cannot reach — so its ids go to the
+	// frontier flagship. The dated snapshot ids retire with them.
+	"gpt-5.5": GPT_6_SOL_MODEL,
+	"gpt-5.5-2026-04-23": GPT_6_SOL_MODEL,
+	"gpt-5.5-20260423": GPT_6_SOL_MODEL,
+	"gpt-5.5-pro": GPT_6_ASTRA_MODEL,
+	"gpt-5.5-pro-2026-04-23": GPT_6_ASTRA_MODEL,
+	"gpt-5.5-pro-20260423": GPT_6_ASTRA_MODEL,
 	"gpt-5.4": GPT_6_SOL_MODEL,
 	"gpt-5.4-mini": GPT_6_LUNA_MODEL,
 	"gpt-5.4-nano": GPT_6_LUNA_MODEL,
-	"gpt-5.4-pro": GPT_5_5_PRO_CANONICAL_MODEL,
+	"gpt-5.4-pro": GPT_6_ASTRA_MODEL,
 	"gpt-5.2": GPT_5_6_SOL_MODEL,
-	"gpt-5.2-pro": GPT_5_5_PRO_CANONICAL_MODEL,
+	"gpt-5.2-pro": GPT_6_ASTRA_MODEL,
 	"gpt-5.1": GPT_5_6_SOL_MODEL,
 	"gpt-5-mini": GPT_5_6_TERRA_MODEL,
 	"gpt-5-nano": GPT_5_6_LUNA_MODEL,
@@ -668,11 +687,18 @@ function resolveGpt6CatalogModel(modelId: string): string | undefined {
 	// never forms and it used to fall through to GPT-5.5 while still passing
 	// capability-policy's catalog gate. Gate and resolver have to agree on the
 	// same id or the policy store keys state a request never reads.
-	const isGpt6 = versionToken === "6" || tokens.includes("gpt6");
+	const gpt6Index = tokens.indexOf("gpt6");
+	const isGpt6 = versionToken === "6" || gpt6Index !== -1;
+	// A 6.1 minor shows up as the token after `6` (`gpt-6.1-sol`) or after
+	// `gpt6` (`gpt6.1-sol`); both forms have to land on the 6.1 generation,
+	// not on the 6.0 tier the trailing `sol`/`luna` tokens name.
+	const isGpt61 =
+		(isGpt6 && gptIndex !== -1 && tokens[gptIndex + 2] === "1") ||
+		(gpt6Index !== -1 && tokens[gpt6Index + 1] === "1");
 	// A bare `astra` token counts too. OpenAI's own launch material and every
 	// picker label say "Astra" without the `gpt-6` prefix, so `Astra Pro` and
 	// `astra-fast` reach this resolver with no version tokens at all; without
-	// this clause they miss every branch and land on GPT-5.5.
+	// this clause they miss every branch and land on the default.
 	//
 	// It is anchored, not a free-floating substring: an id that names a
 	// DIFFERENT GPT major version does not get claimed for the frontier model
@@ -687,8 +713,15 @@ function resolveGpt6CatalogModel(modelId: string): string | undefined {
 		return undefined;
 	}
 
-	if (tokens.includes("aeon")) return GPT_6_ASTRA_AEON_MODEL;
+	// `aeon` was the leaked long-horizon Astra variant; retired, its ids run on
+	// the flagship. `astra` keeps its own canonical id because Astra is a
+	// behaviourally different model, not a rename of the Sol workhorse.
+	if (tokens.includes("aeon")) return GPT_6_ASTRA_MODEL;
 	if (isAstra) return GPT_6_ASTRA_MODEL;
+	// Every unrecognised 6.1 id resolves to the generation's only tier, Sol —
+	// the same in-minor flagship rule the 5.6 resolver applies, kept behind
+	// `astra` so `gpt-6.1-astra` names the frontier model it actually means.
+	if (isGpt61) return GPT_6_1_SOL_MODEL;
 	// Before Sol and Luna existed every non-Astra GPT-6 id fell to the line
 	// below, so `gpt-6-luna` silently ran Astra at 100x Luna's price. `terra`
 	// goes to Sol because there is no GPT-6 Terra and upstream migrates

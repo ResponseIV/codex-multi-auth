@@ -883,7 +883,7 @@ describe('createEntitlementErrorResponse', () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			});
-			expect(second).toBe('gpt-5.5');
+			expect(second).toBe('gpt-6-luna');
 		});
 
 		it('respects legacy gpt-5.3 -> gpt-5.2 toggle when disabled', () => {
@@ -939,7 +939,7 @@ describe('createEntitlementErrorResponse', () => {
 			).toBe('gpt-5.2-codex');
 		});
 
-		it('treats GPT-5.5 as the floor and steps dated 5.5 ids to their canonical model', () => {
+		it('steps retired GPT-5.5-era ids to their named replacements', () => {
 			const errorBody = {
 				error: {
 					code: 'model_not_supported_with_chatgpt_account',
@@ -956,7 +956,7 @@ describe('createEntitlementErrorResponse', () => {
 					fallbackOnUnsupportedCodexModel: true,
 					fallbackToGpt52OnUnsupportedGpt53: true,
 				}),
-			).toBeUndefined();
+			).toBe('gpt-6-sol');
 
 			expect(
 				resolveUnsupportedCodexFallbackModel({
@@ -972,7 +972,7 @@ describe('createEntitlementErrorResponse', () => {
 					fallbackOnUnsupportedCodexModel: true,
 					fallbackToGpt52OnUnsupportedGpt53: true,
 				}),
-			).toBe('gpt-5.5-pro');
+			).toBe('gpt-6-astra');
 
 			expect(
 				resolveUnsupportedCodexFallbackModel({
@@ -987,7 +987,7 @@ describe('createEntitlementErrorResponse', () => {
 					fallbackOnUnsupportedCodexModel: true,
 					fallbackToGpt52OnUnsupportedGpt53: true,
 				}),
-			).toBeUndefined();
+			).toBe('gpt-6-sol');
 		});
 
 		it('resolves stale bare GPT-5 and retired Codex aliases to their replacements', () => {
@@ -1005,7 +1005,7 @@ describe('createEntitlementErrorResponse', () => {
 					fallbackOnUnsupportedCodexModel: true,
 					fallbackToGpt52OnUnsupportedGpt53: true,
 				}),
-			).toBe('gpt-5.5');
+			).toBe('gpt-5.6-sol');
 
 			expect(
 				resolveUnsupportedCodexFallbackModel({
@@ -1802,7 +1802,7 @@ describe('createEntitlementErrorResponse', () => {
 			);
 			expect(result).toBeDefined();
 			expect(result?.body).toBeDefined();
-			expect(result?.body.model).toBe('gpt-5.5');
+			expect(result?.body.model).toBe('gpt-6-sol');
 			expect(result?.updatedInit).toBeDefined();
 		});
 	describe("additional edge branches", () => {

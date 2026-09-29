@@ -4107,8 +4107,9 @@ describe("codex manager cli commands", () => {
 		]);
 
 		expect(exitCode).toBe(0);
+		// Retired gpt-5.5 is normalized to its replacement before the probe runs.
 		expect(quotaProbeMocks.fetchCodexQuotaSnapshot).toHaveBeenCalledWith(
-			expect.objectContaining({ model: "gpt-5.5" }),
+			expect.objectContaining({ model: "gpt-6-sol" }),
 		);
 		expect(storageMocks.saveAccounts).not.toHaveBeenCalled();
 		expect(codexCliWriterMocks.setCodexCliActiveSelection).not.toHaveBeenCalled();

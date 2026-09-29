@@ -62,6 +62,13 @@ describe("retired models", () => {
 				"gpt-5.4-mini",
 				"gpt-5.4-nano",
 				"gpt-5.4-pro",
+				"gpt-5.5",
+				"gpt-5.5-2026-04-23",
+				"gpt-5.5-20260423",
+				"gpt-5.5-pro",
+				"gpt-5.5-pro-2026-04-23",
+				"gpt-5.5-pro-20260423",
+				"gpt-6-astra-aeon",
 			].sort(),
 		);
 	});
@@ -120,9 +127,10 @@ describe("retired models", () => {
 		}
 	});
 
-	it("walks every retired id down to the gpt-5.5 floor, Terra included", () => {
-		// Terra had no row, so the codex minis and `gpt-5-mini` (which step into
-		// it) stopped there while every other retired id reached `gpt-5.5`.
+	it("walks every retired id down to a live floor model", () => {
+		// With `gpt-5.5` retired the general staircase ends on the Luna tiers
+		// (broadest plan coverage) or `gpt-5.6-sol`, the workhorse every codex
+		// request shares. Whichever a given walk reaches last, it must be live.
 		const body = {
 			error: {
 				message:
@@ -146,7 +154,10 @@ describe("retired models", () => {
 					last = model;
 				}
 			}
-			expect(["gpt-5.5", "gpt-5.5-pro"], `${retired} ends at ${last}`).toContain(last);
+			expect(
+				["gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-luna"],
+				`${retired} ends at ${last}`,
+			).toContain(last);
 		}
 	});
 

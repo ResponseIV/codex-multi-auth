@@ -83,12 +83,12 @@ codex-multi-auth forecast --live
 
 ### Model Defaults
 
-- General routing default (`DEFAULT_MODEL`, the `gpt-5` alias target): `gpt-5.5`.
+- General routing default (`DEFAULT_MODEL`): `gpt-6.1-sol`. The `gpt-5` alias targets `gpt-5.6-sol`, the newest 5.x generation still served.
 - Live diagnostic probes (`check`, `report`, `forecast`, `best`, `fix`) lead with `gpt-5.6-sol`, then fall through a chain for accounts without entitlement.
 
 ```bash
 codex-multi-auth forecast --live --model gpt-5.6-sol
-codex-multi-auth fix --live --model gpt-5.5
+codex-multi-auth fix --live --model gpt-6.1-sol
 ```
 
 ### Login Flow

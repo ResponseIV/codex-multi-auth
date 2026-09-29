@@ -223,7 +223,9 @@ describe("usage ledger core", () => {
 			"../lib/usage/index.js"
 		);
 
-		expect(Object.keys(listUsageModelPricing())).toContain("gpt-5.5");
+		expect(Object.keys(listUsageModelPricing())).toContain("gpt-6.1-sol");
+		// Retired gpt-5.5 prices through its replacement card (gpt-6-sol);
+		// 1M input crosses the 272K long-context threshold ($4/$15/$0.40).
 		expect(
 			estimateUsageCostUsd("gpt-5.5", {
 				inputTokens: 1_000_000,
@@ -232,7 +234,7 @@ describe("usage ledger core", () => {
 				reasoningTokens: 1_000_000,
 				totalTokens: 4_000_000,
 			}),
-		).toBe(24.2);
+		).toBe(30.4);
 		expect(
 			estimateUsageCostUsd("gpt-5.5", {
 				inputTokens: 1_000,
@@ -241,7 +243,7 @@ describe("usage ledger core", () => {
 				reasoningTokens: 25,
 				totalTokens: 1_225,
 			}),
-		).toBe(0.00461);
+		).toBe(0.00416);
 		expect(
 			estimateUsageCostUsd(null, {
 				inputTokens: 1,

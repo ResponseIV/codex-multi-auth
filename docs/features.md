@@ -31,7 +31,7 @@ Email dedup is case-insensitive, so the same account can't land in the pool twic
 | Explain the current or last selection | `codex-multi-auth why-selected` |
 | Full diagnostic report | `codex-multi-auth report --live --json` |
 
-`--live` reads real quota headers. Probes lead with `gpt-5.6-sol` and fall through a model chain for accounts without entitlement; general routing defaults to `gpt-5.5`.
+`--live` reads real quota headers. Probes lead with `gpt-5.6-sol` and fall through a model chain for accounts without entitlement; general routing defaults to `gpt-6.1-sol`.
 
 ---
 

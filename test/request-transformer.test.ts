@@ -51,9 +51,9 @@ describe('Request Transformer Module', () => {
 
 		it('routes retired GPT-5.4 era general models to their replacements', async () => {
 			expect(normalizeModel('gpt-5.4')).toBe('gpt-6-sol');
-			expect(normalizeModel('gpt-5.4-pro-high')).toBe('gpt-5.5-pro');
-			expect(normalizeModel('gpt-5')).toBe('gpt-5.5');
-			expect(normalizeModel('gpt-5-pro-high')).toBe('gpt-5.5-pro');
+			expect(normalizeModel('gpt-5.4-pro-high')).toBe('gpt-6-astra');
+			expect(normalizeModel('gpt-5')).toBe('gpt-5.6-sol');
+			expect(normalizeModel('gpt-5-pro-high')).toBe('gpt-6-astra');
 		});
 
 		it('maps retired mini and nano aliases onto their replacement small models', async () => {
@@ -65,17 +65,17 @@ describe('Request Transformer Module', () => {
 			expect(normalizeModel('gpt-5-nano')).toBe('gpt-5.6-luna');
 		});
 
-		it('defaults unknown requests to GPT-5.5 instead of GPT-5.1', async () => {
-			expect(normalizeModel('unknown-model')).toBe('gpt-5.5');
-			expect(normalizeModel('gpt-4')).toBe('gpt-5.5');
-			expect(normalizeModel(undefined)).toBe('gpt-5.5');
-			expect(normalizeModel('')).toBe('gpt-5.5');
+		it('defaults unknown requests to the current default model', async () => {
+			expect(normalizeModel('unknown-model')).toBe('gpt-6.1-sol');
+			expect(normalizeModel('gpt-4')).toBe('gpt-6.1-sol');
+			expect(normalizeModel(undefined)).toBe('gpt-6.1-sol');
+			expect(normalizeModel('')).toBe('gpt-6.1-sol');
 		});
 
-		it('keeps GPT-5.5 aliases canonical before any unsupported-model fallback happens', async () => {
-			expect(normalizeModel('gpt-5.5')).toBe('gpt-5.5');
-			expect(normalizeModel('gpt-5.5-high')).toBe('gpt-5.5');
-			expect(normalizeModel('gpt-5.5-pro')).toBe('gpt-5.5-pro');
+		it('routes retired GPT-5.5 aliases to their replacements before any unsupported-model fallback happens', async () => {
+			expect(normalizeModel('gpt-5.5')).toBe('gpt-6-sol');
+			expect(normalizeModel('gpt-5.5-high')).toBe('gpt-6-sol');
+			expect(normalizeModel('gpt-5.5-pro')).toBe('gpt-6-astra');
 		});
 
 		it('still prioritizes codex detection when model names contain both codex and GPT-5', async () => {
@@ -85,9 +85,9 @@ describe('Request Transformer Module', () => {
 
 		it('handles case and formatting variations', async () => {
 			expect(normalizeModel('GPT-5.4')).toBe('gpt-6-sol');
-			expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5.5');
-			expect(normalizeModel('Gpt-5.4-Pro')).toBe('gpt-5.5-pro');
-			expect(normalizeModel('GPT 5 High (ChatGPT Subscription)')).toBe('gpt-5.5');
+			expect(normalizeModel('GPT-5-HIGH')).toBe('gpt-5.6-sol');
+			expect(normalizeModel('Gpt-5.4-Pro')).toBe('gpt-6-astra');
+			expect(normalizeModel('GPT 5 High (ChatGPT Subscription)')).toBe('gpt-5.6-sol');
 			expect(normalizeModel('GPT 5 Codex Low (ChatGPT Subscription)')).toBe('gpt-5.6-sol');
 		});
 	});
@@ -780,14 +780,14 @@ describe('Request Transformer Module', () => {
 			expect(result.model).toBe('gpt-5.6-terra');
 		});
 
-		it('should apply current GPT-5.5 default reasoning config for stale bare GPT-5 aliases', async () => {
+		it('should apply the 5.6 Sol default reasoning config for stale bare GPT-5 aliases', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5',
 				input: [],
 			};
 			const result = await transformRequestBody(body, codexInstructions);
 
-			expect(result.reasoning?.effort).toBe('none');
+			expect(result.reasoning?.effort).toBe('low');
 			expect(result.reasoning?.summary).toBe('auto');
 		});
 
@@ -811,7 +811,8 @@ describe('Request Transformer Module', () => {
 			expect(result.text?.verbosity).toBe('low');
 		});
 
-		it('should allow none reasoning for fast session on gpt-5.5 general', async () => {
+		it('should clamp none reasoning to low for fast session on a retired 5.5-era id', async () => {
+			// `gpt-5.5` accepted `none`; it runs on 6 Sol now, which does not.
 			const body: RequestBody = {
 				model: 'gpt-5.5',
 				input: [],
@@ -825,7 +826,7 @@ describe('Request Transformer Module', () => {
 				true,
 			);
 
-			expect(result.reasoning?.effort).toBe('none');
+			expect(result.reasoning?.effort).toBe('low');
 			expect(result.reasoning?.summary).toBe('auto');
 			expect(result.text?.verbosity).toBe('low');
 		});
@@ -1648,7 +1649,7 @@ describe('Request Transformer Module', () => {
 			expect(result.reasoning?.effort).toBe('xhigh');
 		});
 
-		it('should downgrade max to xhigh for general models without max', async () => {
+		it('should keep max for retired 5.5-era ids, which run on max-capable GPT-6 models', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5.5-high',
 				input: [],
@@ -1658,11 +1659,11 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-			expect(result.model).toBe('gpt-5.5');
-			expect(result.reasoning?.effort).toBe('xhigh');
+			expect(result.model).toBe('gpt-6-sol');
+			expect(result.reasoning?.effort).toBe('max');
 		});
 
-		it('should use the GPT-5.5 reasoning defaults before any unsupported-model fallback', async () => {
+		it('should use the GPT-6 Sol reasoning defaults before any unsupported-model fallback', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5.5-high',
 				input: [],
@@ -1672,12 +1673,12 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-			expect(result.model).toBe('gpt-5.5');
+			expect(result.model).toBe('gpt-6-sol');
 			expect(result.reasoning?.effort).toBe('low');
 			expect(result.text?.verbosity).toBe('medium');
 		});
 
-		it('should preserve none for GPT-5.5', async () => {
+		it('should upgrade none for a retired 5.5-era id, since its replacement rejects none', async () => {
 			const body: RequestBody = {
 				model: 'gpt-5.5-none',
 				input: [],
@@ -1687,8 +1688,8 @@ describe('Request Transformer Module', () => {
 				models: {},
 			};
 			const result = await transformRequestBody(body, codexInstructions, userConfig);
-			expect(result.model).toBe('gpt-5.5');
-			expect(result.reasoning?.effort).toBe('none');
+			expect(result.model).toBe('gpt-6-sol');
+			expect(result.reasoning?.effort).toBe('low');
 		});
 
 			it('should upgrade none to low for retired GPT-5.2-codex (gpt-5.6-sol does not support none)', async () => {
@@ -2129,7 +2130,8 @@ describe('Request Transformer Module', () => {
 					'Removed 1 plan-mode-only tool definition(s) because collaboration mode is default',
 				);
 			});
-			it('removes tool_search tools when the selected model lacks search capability', async () => {
+			it('keeps tool_search tools for a retired id whose replacement supports search', async () => {
+				// `gpt-5.5-pro` lacked tool_search; it runs on Astra now, which has it.
 				const body: RequestBody = {
 					model: 'gpt-5.5-pro',
 					input: [],
@@ -2146,6 +2148,7 @@ describe('Request Transformer Module', () => {
 
 				const result = await transformRequestBody(body, codexInstructions);
 				expect(result.tools).toEqual([
+					{ type: 'tool_search', max_num_results: 3 },
 					{
 						type: 'mcp',
 						server_label: 'docs',
@@ -2155,7 +2158,7 @@ describe('Request Transformer Module', () => {
 				]);
 			});
 
-			it('uses the GPT-5.5 pro capability surface before any unsupported-model fallback', async () => {
+			it('uses the GPT-6 Astra capability surface for retired pro ids', async () => {
 				const body: RequestBody = {
 					model: 'gpt-5.5-pro',
 					input: [],
@@ -2179,10 +2182,11 @@ describe('Request Transformer Module', () => {
 					codexInstructions,
 					userConfig,
 				);
-				expect(result.model).toBe('gpt-5.5-pro');
-				expect(result.reasoning?.effort).toBe('medium');
+				expect(result.model).toBe('gpt-6-astra');
+				expect(result.reasoning?.effort).toBe('low');
 				expect(result.text?.verbosity).toBe('medium');
 				expect(result.tools).toEqual([
+					{ type: 'tool_search', max_num_results: 3 },
 					{
 						type: 'computer_use_preview',
 						display_width: 1024,
@@ -2218,15 +2222,36 @@ describe('Request Transformer Module', () => {
 			});
 
 			it('filters unsupported namespace tool entries while keeping supported remote MCP tools', async () => {
-				const body: RequestBody = {
-					model: 'gpt-5.5-pro',
-					input: [],
-					tools: [
+				// `gpt-5.5-pro` normalizes to `gpt-6-astra` before capability lookup,
+				// so the stub keys on the replacement model.
+				capabilityOverride.model = 'gpt-6-astra';
+				try {
+					const body: RequestBody = {
+						model: 'gpt-5.5-pro',
+						input: [],
+						tools: [
+							{
+								type: 'namespace',
+								name: 'search_suite',
+								tools: [
+									{ type: 'tool_search', max_num_results: 2 },
+									{
+										type: 'mcp',
+										server_label: 'remote-docs',
+										server_url: 'https://mcp.example.com',
+										defer_loading: true,
+									},
+								],
+							},
+						] as any,
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+					expect(result.tools).toEqual([
 						{
 							type: 'namespace',
 							name: 'search_suite',
 							tools: [
-								{ type: 'tool_search', max_num_results: 2 },
 								{
 									type: 'mcp',
 									server_label: 'remote-docs',
@@ -2235,30 +2260,42 @@ describe('Request Transformer Module', () => {
 								},
 							],
 						},
-					] as any,
-				};
-
-				const result = await transformRequestBody(body, codexInstructions);
-				expect(result.tools).toEqual([
-					{
-						type: 'namespace',
-						name: 'search_suite',
-						tools: [
-							{
-								type: 'mcp',
-								server_label: 'remote-docs',
-								server_url: 'https://mcp.example.com',
-								defer_loading: true,
-							},
-						],
-					},
-				]);
+					]);
+				} finally {
+					capabilityOverride.model = undefined;
+				}
 			});
 			it('filters unsupported tools from nested namespaces without dropping supported descendants', async () => {
-				const body: RequestBody = {
-					model: 'gpt-5.5-pro',
-					input: [],
-					tools: [
+				capabilityOverride.model = 'gpt-6-astra';
+				try {
+					const body: RequestBody = {
+						model: 'gpt-5.5-pro',
+						input: [],
+						tools: [
+							{
+								type: 'namespace',
+								name: 'outer_suite',
+								tools: [
+									{
+										type: 'namespace',
+										name: 'inner_suite',
+										tools: [
+											{ type: 'tool_search', max_num_results: 2 },
+											{
+												type: 'mcp',
+												server_label: 'remote-docs',
+												server_url: 'https://mcp.example.com',
+												defer_loading: true,
+											},
+										],
+									},
+								],
+							},
+						] as any,
+					};
+
+					const result = await transformRequestBody(body, codexInstructions);
+					expect(result.tools).toEqual([
 						{
 							type: 'namespace',
 							name: 'outer_suite',
@@ -2267,7 +2304,6 @@ describe('Request Transformer Module', () => {
 									type: 'namespace',
 									name: 'inner_suite',
 									tools: [
-										{ type: 'tool_search', max_num_results: 2 },
 										{
 											type: 'mcp',
 											server_label: 'remote-docs',
@@ -2278,30 +2314,10 @@ describe('Request Transformer Module', () => {
 								},
 							],
 						},
-					] as any,
-				};
-
-				const result = await transformRequestBody(body, codexInstructions);
-				expect(result.tools).toEqual([
-					{
-						type: 'namespace',
-						name: 'outer_suite',
-						tools: [
-							{
-								type: 'namespace',
-								name: 'inner_suite',
-								tools: [
-									{
-										type: 'mcp',
-										server_label: 'remote-docs',
-										server_url: 'https://mcp.example.com',
-										defer_loading: true,
-									},
-								],
-							},
-						],
-					},
-				]);
+					]);
+				} finally {
+					capabilityOverride.model = undefined;
+				}
 			});
 		});
 

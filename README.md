@@ -85,7 +85,7 @@ Everyday examples:
 ```bash
 codex-multi-auth switch 2                     # pin account #2
 codex-multi-auth report --live --json         # full machine-readable health report
-codex-multi-auth fix --live --model gpt-5.5   # live repair probes with a chosen model
+codex-multi-auth fix --live --model gpt-6.1-sol   # live repair probes with a chosen model
 codex-multi-auth doctor --fix                 # diagnose and apply the safest fixes
 codex-multi-auth usage --since 24h --by model # local usage ledger summary
 codex-multi-auth rotation status              # is live rotation enabled?

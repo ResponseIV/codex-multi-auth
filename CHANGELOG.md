@@ -5,6 +5,36 @@ Dates use ISO format (`YYYY-MM-DD`).
 
 This repository's current stable release line is `2.x`. Full release notes live in [`docs/releases/`](docs/releases/) — this file is the short version. Pre-`0.1.0` iteration history is archived in [`docs/releases/legacy-pre-0.1-history.md`](docs/releases/legacy-pre-0.1-history.md). Conventions: entry headings are `## [x.y.z] - YYYY-MM-DD`; section headings come from `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Internal`, `Notes`; issue and pull-request references link as `[#N](https://github.com/ndycode/codex-multi-auth/pull/N)`.
 
+## [Unreleased]
+
+### Added
+
+- `gpt-6.1-sol` support across the model map, resolver, reasoning-effort
+  ladder (low–ultra, default `low`), capability profile, pricing card,
+  config templates, and the standalone `scripts/codex.js` wrapper.
+  `gpt-6.1-sol` is now `DEFAULT_MODEL`, mirroring upstream commit
+  `b1e72963` which made it the catalog's priority-1 model.
+
+### Changed
+
+- Retired `gpt-5.5` and `gpt-5.5-pro` (including dated snapshot ids):
+  they now resolve to `gpt-6-sol` and `gpt-6-astra` respectively, matching
+  OpenAI's migration targets ahead of the 2026-10-14 OAuth shutdown.
+- Retired `gpt-6-astra-aeon` (never a durable catalog id): resolves to
+  `gpt-6-astra`.
+- Unsupported-model fallback chain re-floored away from `gpt-5.5`:
+  `gpt-6.1-sol → gpt-6-sol → gpt-5.6-sol → gpt-6-luna`, with the pro tier
+  stepping `gpt-6-astra → gpt-6-sol` first.
+- `gpt-5` and unknown GPT-5-ish requests now land on `gpt-5.6-sol`;
+  `gpt-5.4` routes to `gpt-6-sol`, `gpt-5.4-mini`/`nano` to `gpt-6-luna`,
+  and `gpt-5.4-pro` to `gpt-6-astra`.
+- Pricing for retired ids is resolved through the replacement model's
+  rate card.
+- Context-window estimates table emptied deliberately: models with
+  uncertain Codex-vs-API limits (`gpt-6.1-sol`, `gpt-6-*`, `gpt-5.6-*`,
+  Daybreak) return `null` unless a user override is supplied, rather than
+  inventing a window.
+
 ## [2.17.3] - 2026-09-28
 
 Eighteen-PR review-and-hardening stack: OAuth redaction and boundary-trust
