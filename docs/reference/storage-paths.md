@@ -244,7 +244,8 @@ Rules:
 
 Experimental sync targets the companion `oc-codex-multi-auth` (formerly
 `oc-chatgpt-multi-auth`) storage layout, root overridable with
-`OC_CHATGPT_MULTI_AUTH_DIR`. Both account filenames are detected — the current
+`OC_CODEX_MULTI_AUTH_DIR` (the legacy `OC_CHATGPT_MULTI_AUTH_DIR` name is still
+accepted as a fallback). Both account filenames are detected — the current
 `oc-codex-multi-auth-accounts.json` and the legacy
 `openai-codex-accounts.json` — preferring the current name when a root holds
 both:

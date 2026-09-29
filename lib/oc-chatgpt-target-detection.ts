@@ -303,7 +303,8 @@ function inferScopeFromRoot(
 /**
  * Detects the oc-chatgpt multi-auth storage target by evaluating explicit, canonical, and per-project candidate roots.
  *
- * Examines an explicit override (OC_CHATGPT_MULTI_AUTH_DIR or options.explicitRoot), the canonical user store (~/.opencode),
+ * Examines an explicit override (OC_CODEX_MULTI_AUTH_DIR, the legacy OC_CHATGPT_MULTI_AUTH_DIR alias, or
+ * options.explicitRoot), the canonical user store (~/.opencode),
  * and a per-project storage location (derived from options.projectRoot or the current working directory). For each candidate
  * it checks for account artifacts and storage signals and returns a single resolved target, an ambiguity listing multiple
  * matching candidates, or a "none" result with the attempted candidates. This function performs synchronous filesystem checks
@@ -313,7 +314,7 @@ function inferScopeFromRoot(
  *
  * @param options - Optional overrides:
  *   - explicitRoot: absolute path to force as the candidate root (use `null` to explicitly disable); if omitted the
- *     OC_CHATGPT_MULTI_AUTH_DIR environment variable is considered.
+ *     OC_CODEX_MULTI_AUTH_DIR environment variable is considered, then the legacy OC_CHATGPT_MULTI_AUTH_DIR alias.
  *   - projectRoot: explicit project root to derive per-project storage; if omitted the current working directory is used to
  *     discover the project root.
  * @returns An OcChatgptTargetDetectionResult describing either a resolved `target` (with `descriptor` and a `resolution`
@@ -323,7 +324,12 @@ export function detectOcChatgptMultiAuthTarget(options?: {
 	explicitRoot?: string | null;
 	projectRoot?: string | null;
 }): OcChatgptTargetDetectionResult {
-	const explicitFromEnv = (process.env.OC_CHATGPT_MULTI_AUTH_DIR ?? "").trim();
+	const explicitFromEnv = (
+		firstNonEmpty([
+			process.env.OC_CODEX_MULTI_AUTH_DIR,
+			process.env.OC_CHATGPT_MULTI_AUTH_DIR,
+		]) ?? ""
+	).trim();
 	const hasExplicitRootOption =
 		options !== undefined && "explicitRoot" in options;
 	const explicitRoot = (
@@ -471,7 +477,7 @@ export function detectOcChatgptMultiAuthTarget(options?: {
 	return {
 		kind: "none",
 		reason:
-			"No oc-chatgpt-multi-auth target root found; create ~/.opencode or supply OC_CHATGPT_MULTI_AUTH_DIR.",
+			"No oc-chatgpt-multi-auth target root found; create ~/.opencode or supply OC_CODEX_MULTI_AUTH_DIR (legacy OC_CHATGPT_MULTI_AUTH_DIR is still accepted).",
 		tried: candidates.map(
 			({ scope, source, root, accountPath, backupRoot }) => ({
 				scope,

@@ -292,7 +292,7 @@ advanced names:
 - `CODEX_MULTI_AUTH_UPDATE_NOTICE_STARTUP_BUDGET_MS`, `CODEX_MULTI_AUTH_STATUS_QUOTA_REFRESH_INTERVAL_MS`, `CODEX_MULTI_AUTH_STATUS_REFRESH_CHILD` (internal), `CODEX_MULTI_AUTH_USAGE_CODEX_BIN`, `CODEX_MULTI_AUTH_APP_BIND_CODEX_HOME`, `CODEX_MULTI_AUTH_APP_ROTATION_DETACH_GRACE_MS`, `CODEX_MULTI_AUTH_RUNTIME_PROXY_UPSTREAM_BASE_URL`, `CODEX_MULTI_AUTH_MODEL_CAPACITY_RETRY_MS`
 - `CODEX_AUTH_ACCOUNT_ID` — login org binding override (`--org` wins)
 - `MCODEX_MONITOR_INTERVAL` / `MCODEX_TMUX_SESSION` / `MCODEX_TMUX_HISTORY_LIMIT`
-- `OC_CHATGPT_MULTI_AUTH_DIR` — override root for the experimental `oc-codex-multi-auth` sync target
+- `OC_CODEX_MULTI_AUTH_DIR` — override root for the experimental `oc-codex-multi-auth` sync target (legacy name `OC_CHATGPT_MULTI_AUTH_DIR` is still accepted)
 
 Full inventory: [../development/CONFIG_FIELDS.md](../development/CONFIG_FIELDS.md)
 

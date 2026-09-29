@@ -181,7 +181,7 @@ lib/
 ├── context-overflow.ts            # reactive context-overflow detector/handler
 ├── synthetic-response.ts          # shared builder for locally-answered Responses replies
 ├── api-route-store.ts             # persisted api/zdr route definitions (zod + lock/CAS writes)
-├── oc-chatgpt-target-detection.ts # locate an oc-chatgpt multi-auth store (OC_CHATGPT_MULTI_AUTH_DIR)
+├── oc-chatgpt-target-detection.ts # locate an oc-chatgpt multi-auth store (OC_CODEX_MULTI_AUTH_DIR, legacy OC_CHATGPT_MULTI_AUTH_DIR)
 ├── oc-chatgpt-import-adapter.ts   # build/preview import payloads from that store
 ├── oc-chatgpt-orchestrator.ts     # plan/apply oc-chatgpt sync + named-backup export
 ├── capability-policy.ts           # unsupported-model suppression scoring (in-memory; dormant at runtime)

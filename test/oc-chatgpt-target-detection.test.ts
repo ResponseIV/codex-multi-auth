@@ -81,6 +81,7 @@ describe("oc-chatgpt target detection", () => {
 	const originalHome = process.env.HOME;
 	const originalUserProfile = process.env.USERPROFILE;
 	const originalOverride = process.env.OC_CHATGPT_MULTI_AUTH_DIR;
+	const originalOverrideAlias = process.env.OC_CODEX_MULTI_AUTH_DIR;
 	const originalPlatform = process.platform;
 	let workDir: string;
 	let homeDir: string;
@@ -95,6 +96,7 @@ describe("oc-chatgpt target detection", () => {
 		process.env.HOME = homeDir;
 		process.env.USERPROFILE = homeDir;
 		delete process.env.OC_CHATGPT_MULTI_AUTH_DIR;
+		delete process.env.OC_CODEX_MULTI_AUTH_DIR;
 	});
 
 	afterEach(async () => {
@@ -108,6 +110,9 @@ describe("oc-chatgpt target detection", () => {
 		if (originalOverride === undefined)
 			delete process.env.OC_CHATGPT_MULTI_AUTH_DIR;
 		else process.env.OC_CHATGPT_MULTI_AUTH_DIR = originalOverride;
+		if (originalOverrideAlias === undefined)
+			delete process.env.OC_CODEX_MULTI_AUTH_DIR;
+		else process.env.OC_CODEX_MULTI_AUTH_DIR = originalOverrideAlias;
 		Object.defineProperty(process, "platform", {
 			value: originalPlatform,
 			configurable: true,
@@ -273,6 +278,30 @@ describe("oc-chatgpt target detection", () => {
 			expect(result.descriptor.source).toBe("explicit");
 			expect(result.descriptor.resolution).toBe("signals");
 		}
+	});
+
+	it("accepts OC_CODEX_MULTI_AUTH_DIR as the canonical override, preferring it over the legacy name", async () => {
+		const overrideRoot = join(workDir, "codex-override-root");
+		const legacyRoot = join(workDir, "legacy-override-root");
+		await fs.mkdir(join(overrideRoot, "backups"), { recursive: true });
+		await fs.mkdir(join(legacyRoot, "backups"), { recursive: true });
+		process.env.OC_CODEX_MULTI_AUTH_DIR = overrideRoot;
+		process.env.OC_CHATGPT_MULTI_AUTH_DIR = legacyRoot;
+
+		const result = detectOcChatgptMultiAuthTarget();
+		assertTarget(result, "global", overrideRoot);
+		if (result.kind === "target") {
+			expect(result.descriptor.source).toBe("explicit");
+		}
+	});
+
+	it("falls back to the legacy OC_CHATGPT_MULTI_AUTH_DIR name when the new one is unset", async () => {
+		const legacyRoot = join(workDir, "legacy-only-root");
+		await fs.mkdir(join(legacyRoot, "backups"), { recursive: true });
+		process.env.OC_CHATGPT_MULTI_AUTH_DIR = legacyRoot;
+
+		const result = detectOcChatgptMultiAuthTarget();
+		assertTarget(result, "global", legacyRoot);
 	});
 
 	it("keeps the canonical home root global when the home path contains a projects segment", async () => {

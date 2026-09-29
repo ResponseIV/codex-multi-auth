@@ -124,7 +124,7 @@ Package version: 2.17.3
 | Prompt templates | `lib/prompts/codex.ts`, `lib/prompts/host-codex-prompt.ts`, `lib/request/helpers/model-map.ts` | model-family detection, GitHub-release prompts with ETag cache, host prompt detection |
 | Runtime observability | `lib/runtime/runtime-observability.ts` | persisted counters consumed by `status`/`report`/`monitor`/`rotation status`/`why-selected` |
 | Settings hub | `lib/codex-manager/settings-hub/` (shared/dashboard/backend/experimental/index) + `*-settings-*`/`settings-*` siblings | 6 menu actions; Q = cancel; preview-first theme; draft + keyed-merge persist |
-| oc-chatgpt interop | `lib/oc-chatgpt-target-detection.ts`, `lib/oc-chatgpt-import-adapter.ts`, `lib/oc-chatgpt-orchestrator.ts` | detect/import/sync an oc-chatgpt multi-auth store (`OC_CHATGPT_MULTI_AUTH_DIR`) |
+| oc-chatgpt interop | `lib/oc-chatgpt-target-detection.ts`, `lib/oc-chatgpt-import-adapter.ts`, `lib/oc-chatgpt-orchestrator.ts` | detect/import/sync an oc-chatgpt multi-auth store (`OC_CODEX_MULTI_AUTH_DIR`; legacy `OC_CHATGPT_MULTI_AUTH_DIR` accepted) |
 | Update notice | `lib/update-notice.ts` | npm version check with startup budget |
 | Audit log | `lib/audit.ts` | rotating file audit log |
 | Forecast/best | `lib/forecast.ts`, `lib/codex-manager/commands/forecast.ts`, `lib/codex-manager/commands/best.ts` | forecast-pick; `best` also switches |

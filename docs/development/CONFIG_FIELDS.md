@@ -18,7 +18,7 @@ Maintainer walkthrough of how these resolve: [CONFIG_FLOW.md](CONFIG_FLOW.md). U
 | `CODEX_CLI_AUTH_PATH` | Override the official `auth.json` path (`lib/codex-cli/state.ts`) |
 | `CODEX_CLI_ACCOUNTS_PATH` | Override the official `accounts.json` path |
 | `CODEX_CLI_CONFIG_PATH` | Override the official `config.toml` path |
-| `OC_CHATGPT_MULTI_AUTH_DIR` | Explicit root for the `~/.opencode`-style multi-auth account-store detection (`lib/oc-chatgpt-target-detection.ts`); overrides both the global and project-scoped candidate scan |
+| `OC_CODEX_MULTI_AUTH_DIR` | Explicit root for the `~/.opencode`-style multi-auth account-store detection (`lib/oc-chatgpt-target-detection.ts`); overrides both the global and project-scoped candidate scan. Legacy `OC_CHATGPT_MULTI_AUTH_DIR` is still accepted as a fallback |
 | `CODEX_MULTI_AUTH_APP_BIND_CODEX_HOME` | Codex home used by packaged-app bind helpers instead of the resolved one |
 | `CODEX_MULTI_AUTH_APP_LAUNCHER_WINDOWS_DESKTOP_DIR` | Windows desktop shortcut search root for launcher routing |
 | `CODEX_MULTI_AUTH_APP_LAUNCHER_MACOS_DIR` | macOS managed wrapper app install directory |
