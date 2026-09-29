@@ -41,6 +41,14 @@ Node requirement: `>=18.17` to run the published package; use Node `20.19+` (or 
 - behavior-focused tests for all user-visible changes
 - docs updated when commands, flags, paths, defaults, or onboarding behavior change
 
+## Commits And Hooks
+
+- `pre-commit` runs `lint-staged` plus `npm run typecheck`.
+- Commit subjects follow Conventional Commits — `type(scope): description`
+  (types like `feat`, `fix`, `docs`, `chore`, `release`); the style is
+  enforced by review, not by a `commit-msg` hook.
+- `--no-verify` exists but is discouraged.
+
 For user-facing behavior changes, review these files at minimum:
 
 - `README.md`

@@ -100,7 +100,22 @@ No. It targets individual developers running the official Codex CLI with their o
 
 ---
 
-## Where to next?
+## How does the vocabulary map to `oc-codex-multi-auth`?
+
+The sibling project [oc-codex-multi-auth](https://github.com/ndycode/oc-codex-multi-auth) is an OpenCode plugin rather than a Codex CLI manager. Where the same idea has a different name there:
+
+| Here | oc-codex-multi-auth |
+| --- | --- |
+| `check --prime`, `account auto-prime` — start windows on unused subscriptions | `codex-warm` / `warm` — open every enabled account's usage window |
+| Earned reset credits (`resets`) | Banked reset credits (`codex-reset`) |
+| Flagged (sidelined) account | Flagged (quarantined) account |
+| Quota window | Usage window / quota window |
+| `debug bundle` | `codex-diag` — redacted diagnostic snapshot |
+| `check` — live health probe | `codex-health` / `health` — local health summary |
+
+---
+
+## Related
 
 - [getting-started.md](getting-started.md)
 - [features.md](features.md)

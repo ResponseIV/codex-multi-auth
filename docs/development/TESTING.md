@@ -17,7 +17,7 @@ How the test suite is organized, why it runs serially, and which commands gate a
 
 Coverage thresholds in `vitest.config.ts`: statements / branches / functions / lines >= `80`.
 
-Suite size: ~415 test files, ~6,900+ tests (9 skipped by default). `test/documentation.test.ts` is itself part of the gate — it enforces the documentation contract (required files, pinned literals, link integrity, env-var existence).
+Suite size: ~419 test files, ~7,230 tests (9 skipped by default). `test/documentation.test.ts` is itself part of the gate — it enforces the documentation contract (required files, pinned literals, link integrity, env-var existence).
 
 * * *
 
