@@ -5,6 +5,8 @@
 [![CI](https://github.com/ndycode/codex-multi-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/ndycode/codex-multi-auth/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/npm/l/codex-multi-auth.svg)](LICENSE)
 
+<img width="1270" height="729" alt="codex-multi-auth terminal dashboard for Codex CLI multi-account OAuth account status" src="https://github.com/user-attachments/assets/0cecb77e-a6d3-432a-ba48-3577db0c7093" />
+
 `codex-multi-auth` is a multi-account OAuth manager for the official `@openai/codex` CLI. It keeps a named pool of ChatGPT sign-ins on your machine, lets you switch the active account, and — when you run Codex through its optional wrapper — rotates accounts across live requests through a loopback-only proxy. It never installs or shadows a `codex` binary; the official OpenAI install keeps owning that command.
 
 Use it when one Codex account is not enough: you hit rate limits or quota windows, you split work across organizations and workspaces, you want per-project account pools, or you run unattended agents that need JSON diagnostics and safe repair commands instead of one opaque auth file.
