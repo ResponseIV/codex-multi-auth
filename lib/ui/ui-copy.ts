@@ -113,7 +113,7 @@ export const UI_COPY = {
 			"Enter Select | 1 Sync | 2 Backup | 3 Guard | 4 Budget | [ - Down | ] + Up | S Save | Q Back",
 		experimentalHelpPreview: "Enter Select | A Apply | Q Back",
 		experimentalHelpStatus: "Enter Select | Q Back",
-		experimentalSync: "Sync Accounts to oc-chatgpt-multi-auth",
+		experimentalSync: "Sync Accounts to oc-codex-multi-auth",
 		experimentalApplySync: "Apply Sync",
 		experimentalBackup: "Save Pool Backup",
 		experimentalBackupPrompt: "Backup file name (.json): ",

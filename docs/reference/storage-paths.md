@@ -242,11 +242,16 @@ Rules:
 
 ## oc-chatgpt target paths
 
-Experimental sync targets the companion `oc-chatgpt-multi-auth` storage layout
-(root overridable with `OC_CHATGPT_MULTI_AUTH_DIR`):
+Experimental sync targets the companion `oc-codex-multi-auth` (formerly
+`oc-chatgpt-multi-auth`) storage layout, root overridable with
+`OC_CHATGPT_MULTI_AUTH_DIR`. Both account filenames are detected — the current
+`oc-codex-multi-auth-accounts.json` and the legacy
+`openai-codex-accounts.json` — preferring the current name when a root holds
+both:
 
-- global target: `~/.opencode/openai-codex-accounts.json`
-- project target: `~/.opencode/projects/<project-key>/openai-codex-accounts.json`
+- global target: `~/.opencode/oc-codex-multi-auth-accounts.json`
+- project target: `~/.opencode/projects/<project-key>/oc-codex-multi-auth-accounts.json`
+- legacy equivalents: `openai-codex-accounts.json` in the same locations
 - target backups: `~/.opencode/backups/` or project-local `backups/` beside the
   target account file
 

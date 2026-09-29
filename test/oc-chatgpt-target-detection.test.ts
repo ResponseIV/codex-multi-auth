@@ -154,6 +154,52 @@ describe("oc-chatgpt target detection", () => {
 		}
 	});
 
+	it("detects the renamed oc-codex-multi-auth account file", async () => {
+		const globalRoot = join(homeDir, ".opencode");
+		await fs.mkdir(globalRoot, { recursive: true });
+		await fs.writeFile(
+			join(globalRoot, "oc-codex-multi-auth-accounts.json"),
+			"{}",
+			"utf-8",
+		);
+
+		const result = detectOcChatgptMultiAuthTarget({
+			explicitRoot: globalRoot,
+		});
+		assertTarget(result, "global", globalRoot);
+		if (result.kind === "target") {
+			expect(result.descriptor.accountPath).toBe(
+				join(globalRoot, "oc-codex-multi-auth-accounts.json"),
+			);
+			expect(result.descriptor.resolution).toBe("accounts");
+		}
+	});
+
+	it("prefers the renamed file when both account filenames exist", async () => {
+		const globalRoot = join(homeDir, ".opencode");
+		await fs.mkdir(globalRoot, { recursive: true });
+		await fs.writeFile(
+			join(globalRoot, "openai-codex-accounts.json"),
+			"{}",
+			"utf-8",
+		);
+		await fs.writeFile(
+			join(globalRoot, "oc-codex-multi-auth-accounts.json"),
+			"{}",
+			"utf-8",
+		);
+
+		const result = detectOcChatgptMultiAuthTarget({
+			explicitRoot: globalRoot,
+		});
+		assertTarget(result, "global", globalRoot);
+		if (result.kind === "target") {
+			expect(result.descriptor.accountPath).toBe(
+				join(globalRoot, "oc-codex-multi-auth-accounts.json"),
+			);
+		}
+	});
+
 	it("returns ambiguous when both global and project accounts exist", async () => {
 		const projectDir = join(workDir, "project-beta");
 		await fs.mkdir(join(projectDir, ".git"), { recursive: true });
@@ -195,7 +241,7 @@ describe("oc-chatgpt target detection", () => {
 			expect(result.descriptor.source).toBe("explicit");
 			expect(result.descriptor.resolution).toBe("signals");
 			expect(result.descriptor.accountPath).toBe(
-				join(overrideRoot, "openai-codex-accounts.json"),
+				join(overrideRoot, "oc-codex-multi-auth-accounts.json"),
 			);
 		}
 	});
@@ -370,14 +416,20 @@ describe("oc-chatgpt target detection", () => {
 					scope: "global",
 					source: "default-global",
 					root: canonicalRoot,
-					accountPath: join(canonicalRoot, "openai-codex-accounts.json"),
+					accountPath: join(
+						canonicalRoot,
+						"oc-codex-multi-auth-accounts.json",
+					),
 					backupRoot: join(canonicalRoot, "backups"),
 				},
 				{
 					scope: "project",
 					source: "project",
 					root: projectRoot,
-					accountPath: join(projectRoot, "openai-codex-accounts.json"),
+					accountPath: join(
+						projectRoot,
+						"oc-codex-multi-auth-accounts.json",
+					),
 					backupRoot: join(projectRoot, "backups"),
 				},
 			]);
