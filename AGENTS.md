@@ -1,9 +1,9 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-09-28
-Commit: cafa1258
-Branch: docs/architecture-rewrite
-Package version: 2.17.3
+Generated: 2026-09-30
+Commit: ba4dcaa1
+Branch: main
+Package version: 2.18.0
 
 ## OVERVIEW
 

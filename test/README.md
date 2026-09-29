@@ -4,7 +4,7 @@ Vitest suites covering OAuth flows, request transforms, rotation and the runtime
 proxy, storage durability, the CLI manager, governance stores, repo hygiene, and
 documentation parity.
 
-**Stats**: ~7,230 tests across 419 test files with 80% coverage thresholds
+**Stats**: ~7,300 tests across 420 test files with 80% coverage thresholds
 (statements, branches, functions, lines). A small number of tests are skipped by
 default.
 

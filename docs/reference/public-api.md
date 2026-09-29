@@ -1,6 +1,6 @@
 # Public API Contract
 
-Public API contract for `codex-multi-auth` (package `2.17.3`).
+Public API contract for `codex-multi-auth` (package `2.18.0`).
 
 ---
 

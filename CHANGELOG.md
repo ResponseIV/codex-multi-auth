@@ -5,7 +5,13 @@ Dates use ISO format (`YYYY-MM-DD`).
 
 This repository's current stable release line is `2.x`. Full release notes live in [`docs/releases/`](docs/releases/) — this file is the short version. Pre-`0.1.0` iteration history is archived in [`docs/releases/legacy-pre-0.1-history.md`](docs/releases/legacy-pre-0.1-history.md). Conventions: entry headings are `## [x.y.z] - YYYY-MM-DD`; section headings come from `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Internal`, `Notes`; issue and pull-request references link as `[#N](https://github.com/ndycode/codex-multi-auth/pull/N)`.
 
-## [Unreleased]
+## [2.18.0] - 2026-09-30
+
+Model-catalog update tracking upstream `openai/codex@b1e72963`: GPT-6.1 Sol
+becomes the default model, the retiring `gpt-5.5` family migrates to its named
+replacements ahead of the 2026-10-14 OAuth shutdown, and the leaked
+`gpt-6-astra-aeon` slug retires onto the flagship.
+[Full notes](docs/releases/v2.18.0.md).
 
 ### Added
 
@@ -34,6 +40,16 @@ This repository's current stable release line is `2.x`. Full release notes live 
   uncertain Codex-vs-API limits (`gpt-6.1-sol`, `gpt-6-*`, `gpt-5.6-*`,
   Daybreak) return `null` unless a user override is supplied, rather than
   inventing a window.
+
+### Fixed
+
+- Usage pricing resolves bare aliases (`gpt-6.1`, `gpt-6`, `gpt-5.6`,
+  `astra`) and effort-suffixed ids through the exact alias map, so raw
+  ledger rows price at the canonical card instead of failing a
+  `maxCostUsd` budget closed.
+- Wrapper forward bound raised to 5 spawns so the deepest supported-model
+  staircase (`gpt-6.1-sol → … → gpt-5.6-luna`) completes on the last
+  allowed forward, matching the plugin host's outbound-attempt budget.
 
 ## [2.17.3] - 2026-09-28
 
