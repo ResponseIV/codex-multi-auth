@@ -100,7 +100,7 @@ Paused and drained accounts are skipped during proxy selection — these are enf
 
 | Feature | Command |
 | --- | --- |
-| Interactive dashboard — account list, search, settings hub | `codex-multi-auth` with no arguments |
+| Interactive dashboard — account list, search, settings hub | `codex-multi-auth login` on a populated pool |
 | Provider-agnostic local session history | `codex-multi-auth history [show <id>]` |
 | Convenience launcher | `mcodex [--monitor \| --tmux]` |
 | Show where every config value comes from | `codex-multi-auth config explain [--json]` |

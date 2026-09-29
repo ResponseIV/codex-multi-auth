@@ -100,7 +100,7 @@ Controls display style.
 
 Experimental settings currently cover:
 
-- one-way sync preview/apply into `oc-chatgpt-multi-auth`
+- one-way sync preview/apply into `oc-codex-multi-auth` (formerly `oc-chatgpt-multi-auth`)
 - named local pool backup export with filename prompt
 - refresh guard controls (`proactiveRefreshGuardian`,
   `proactiveRefreshIntervalMs`)
@@ -223,7 +223,7 @@ the dashboard panels:
 | `codexTuiV2` | `true` | Enable TUI v2 rendering path |
 | `codexTuiColorProfile` | `truecolor` | `truecolor`, `ansi256`, or `ansi16` |
 | `codexTuiGlyphMode` | `ascii` | `ascii`, `unicode`, or `auto` |
-| `unsupportedCodexPolicy` | `strict` | How unsupported Codex model requests are handled (`strict` \| `auto`) |
+| `unsupportedCodexPolicy` | `strict` | How unsupported Codex model requests are handled (`strict` \| `fallback`) |
 | `fallbackOnUnsupportedCodexModel` | `false` | Whether to fall back when a Codex model is unsupported |
 | `fallbackToGpt52OnUnsupportedGpt53` | `true` | No effect; kept for config compatibility — it gated a retired `gpt-5.3-codex` → `gpt-5.2-codex` hop |
 | `unsupportedCodexFallbackChain` | `{}` | Per-model ordered fallback chain consulted before the generic unsupported-model policy; keys are model ids, values ordered candidate lists |
@@ -292,7 +292,7 @@ advanced names:
 - `CODEX_MULTI_AUTH_UPDATE_NOTICE_STARTUP_BUDGET_MS`, `CODEX_MULTI_AUTH_STATUS_QUOTA_REFRESH_INTERVAL_MS`, `CODEX_MULTI_AUTH_STATUS_REFRESH_CHILD` (internal), `CODEX_MULTI_AUTH_USAGE_CODEX_BIN`, `CODEX_MULTI_AUTH_APP_BIND_CODEX_HOME`, `CODEX_MULTI_AUTH_APP_ROTATION_DETACH_GRACE_MS`, `CODEX_MULTI_AUTH_RUNTIME_PROXY_UPSTREAM_BASE_URL`, `CODEX_MULTI_AUTH_MODEL_CAPACITY_RETRY_MS`
 - `CODEX_AUTH_ACCOUNT_ID` — login org binding override (`--org` wins)
 - `MCODEX_MONITOR_INTERVAL` / `MCODEX_TMUX_SESSION` / `MCODEX_TMUX_HISTORY_LIMIT`
-- `OC_CHATGPT_MULTI_AUTH_DIR` — override root for the experimental oc-chatgpt sync target
+- `OC_CHATGPT_MULTI_AUTH_DIR` — override root for the experimental `oc-codex-multi-auth` sync target
 
 Full inventory: [../development/CONFIG_FIELDS.md](../development/CONFIG_FIELDS.md)
 

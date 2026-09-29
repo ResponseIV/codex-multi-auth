@@ -11,6 +11,8 @@
 
 Use it when one Codex account is not enough: you hit rate limits or quota windows, you split work across organizations and workspaces, you want per-project account pools, or you run unattended agents that need JSON diagnostics and safe repair commands instead of one opaque auth file.
 
+Using OpenCode rather than the Codex CLI? The sibling project [`oc-codex-multi-auth`](https://github.com/ndycode/oc-codex-multi-auth) is the plugin that manages the same kind of account pool there.
+
 ## What it does
 
 - **Account pool** — OAuth login for multiple ChatGPT accounts, stored locally under `~/.codex/multi-auth` (files `0600`, directories `0700`), with per-project pools under `projects/<project-key>/`.
@@ -73,7 +75,7 @@ mcodex                          # same wrapper, shorter name
 | Accounts | `login`, `list`, `status`, `switch <i>`, `unpin`, `workspace` | sign in, inspect the pool, pin or switch the active account, pick workspaces |
 | Selection | `forecast`, `best`, `why-selected`, `check`, `limits`, `models` | preview, explain, and probe which account serves the next request |
 | Runtime | `rotation status` `enable` `disable` `bind-app` `unbind-app` `reset-runtime` `reset-rate-limits` | inspect and control live rotation and the app bind |
-| Repair | `fix`, `doctor`, `verify`, `verify-flagged`, `uninstall` | diagnose and repair storage, flagged accounts, and install residue |
+| Repair | `fix`, `doctor`, `report`, `verify`, `verify-flagged`, `uninstall` | diagnose and repair storage, flagged accounts, and install residue; machine-readable health report |
 | Governance | `usage`, `budget`, `account`, `monitor`, `history`, `resets` | usage ledger, budget limits, tags/weights/pause/drain, snapshots |
 | Local clients | `bridge`, `integrations` | bearer tokens and client snippets for the loopback bridge |
 | Config | `config explain` `template`, `init-config`, `debug bundle`, `features` | effective-config report, config templates, sanitized debug bundle |
@@ -91,7 +93,7 @@ codex-multi-auth rotation status              # is live rotation enabled?
 
 ## Runtime rotation, in one paragraph
 
-With rotation on (the default), request-bearing wrapper commands — `exec`, `review`, `resume`, `fork`, `app`, and the bare TUI — route through a local proxy that picks the healthiest account per request, refreshes tokens as needed, and fails over across the pool on rate limits within a bounded retry budget. The proxy listens on loopback only, authenticates its own clients with a per-process token, forwards only Responses API and model-discovery calls, and never writes account emails or tokens to client headers or logs. Plain `codex` is never touched: rotation exists only inside `codex-multi-auth-codex`/`mcodex` sessions, or inside the packaged desktop app after an opt-in, reversible bind. Turn it off with `codex-multi-auth rotation disable` or `CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY=0`.
+With rotation on (the default), request-bearing wrapper commands — `exec`, `review`, `resume`, `fork`, `app`, and the bare TUI — route through a local proxy that picks the healthiest account per request, refreshes tokens as needed, and fails over across the pool on rate limits within a bounded retry budget. The proxy listens on loopback only, authenticates its own clients with a per-process token, forwards only Responses API, model-discovery, image, and thread-goal calls, and never writes account emails or tokens to client headers or logs. Plain `codex` is never touched: rotation exists only inside `codex-multi-auth-codex`/`mcodex` sessions, or inside the packaged desktop app after an opt-in, reversible bind. Turn it off with `codex-multi-auth rotation disable` or `CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY=0`.
 
 ## Where state lives
 
@@ -130,6 +132,8 @@ Common symptoms — wrong active account, OAuth callback port `1455` already bou
 | [docs/faq.md](docs/faq.md) | Common questions |
 | [docs/upgrade.md](docs/upgrade.md) | Version and legacy-package migration |
 | [docs/privacy.md](docs/privacy.md) | Data handling and local storage behavior |
+| [config/README.md](config/README.md) | Modern vs. legacy catalog templates |
+| [CHANGELOG.md](CHANGELOG.md) | Release history (short version) |
 
 ## Release notes
 

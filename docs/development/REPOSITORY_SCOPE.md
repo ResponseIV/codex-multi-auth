@@ -37,7 +37,7 @@ The **primary product** is the account manager plus the optional forwarding wrap
 | `vendor/` | Vendored `codex-ai-plugin` + `codex-ai-sdk` shims (see below) |
 | `assets/` | Static assets (OAuth success page, etc.) |
 | `bench/` | Edit-format benchmark fixtures and prompts |
-| `skills/` | Agent skill definitions (not shipped in `files[]`) |
+| `skills/` | Agent skill definitions (shipped in `files[]`) |
 | `.codex-plugin/` | Plugin manifest consumed by the plugin scanner |
 | `dist/` | Generated build output — do not edit |
 
@@ -59,13 +59,13 @@ The **primary product** is the account manager plus the optional forwarding wrap
 | WSL / Windows host detection | `lib/wsl.ts` |
 | Runtime rotation proxy | `lib/runtime-rotation-proxy.ts`, `lib/runtime/rotation-*.ts`, `lib/runtime-constants.ts`, `lib/runtime/config-toml.ts` |
 | Account selection | `lib/runtime/rotation-account-selection.ts`, `lib/rotation.ts`, `lib/accounts.ts` |
-| API-key/direct model runtime | `lib/api-model-runtime.ts`, `lib/api-route-store.ts`, `lib/api-model-capabilities.ts`, `lib/api-login-menu.ts` |
-| Native app-bind runtime | `lib/runtime/native-*.ts`, `lib/native-*.ts` (native account storage/sync, client auth, provider config, rate limits, binding lock) |
-| App catalog + reset credits | `lib/account-model-catalog.ts`, `lib/reset-credits.ts`, `lib/reset-credit-routing.ts`, `lib/account-reset-credits.ts` |
-| Automatic account checks | `lib/automatic-account-checks.ts`, `lib/automatic-subscription-checks.ts` |
+| API-key/direct model runtime | `lib/runtime/api-model-runtime.ts`, `lib/api-route-store.ts`, `lib/runtime/api-model-capabilities.ts`, `lib/codex-manager/api-login-menu.ts` |
+| Native app-bind runtime | `lib/runtime/native-*.ts` (native account storage/sync, client auth, provider config, rate limits, binding lock) |
+| App catalog + reset credits | `lib/runtime/account-model-catalog.ts`, `lib/runtime/reset-credits.ts`, `lib/runtime/reset-credit-routing.ts`, `lib/runtime/account-reset-credits.ts` |
+| Automatic account checks | `lib/runtime/automatic-account-checks.ts`, `lib/runtime/automatic-subscription-checks.ts` |
 | Runtime app bind/router | `lib/runtime/app-bind.ts`, `scripts/codex-app-router.js`, `scripts/codex-app-launcher.js` |
 | First-run setup | `lib/runtime/first-run.ts` |
-| Resume picker | `lib/resume-picker.ts` |
+| Resume picker | `lib/runtime/resume-picker.ts` |
 | Runtime observability | `lib/runtime/runtime-observability.ts`, `lib/codex-manager/commands/{status,report,rotation,monitor,why-selected}.ts` |
 | Local bridge | `lib/local-bridge.ts`, `lib/local-client-tokens.ts`, `lib/codex-manager/commands/bridge.ts` |
 | Usage ledger | `lib/usage/`, `lib/codex-manager/commands/usage.ts` |
@@ -73,7 +73,7 @@ The **primary product** is the account manager plus the optional forwarding wrap
 | Account policy | `lib/account-policy.ts`, `lib/codex-manager/commands/account.ts` |
 | Routing profiles | `lib/routing-profiles.ts` (file-only writes; `monitor` reads) |
 | Runtime policy + caches | `lib/policy/runtime-policy.ts`, `lib/policy/runtime-policy-cache.ts` |
-| Capability policy / matrix | `lib/capability-policy.ts`, `lib/model-capability-matrix.ts`, `lib/catalog-capabilities.ts`, `lib/entitlement-cache.ts` |
+| Capability policy / matrix | `lib/capability-policy.ts`, `lib/model-capability-matrix.ts`, `lib/runtime/catalog-capabilities.ts`, `lib/entitlement-cache.ts` |
 | JSON-store CAS machinery | `lib/storage/json-store-lock.ts` (shared queue + `wx` lockfile + mtime CAS for config/settings/policies/budgets/profiles/tokens/quota-cache) |
 | Storage and paths | `lib/storage.ts`, `lib/storage/` (V3 lifecycle, WAL/backups, `storage/paths.ts` worktree identity), `lib/runtime-paths.ts` |
 | Unified settings/config | `lib/unified-settings.ts`, `lib/dashboard-settings.ts`, `lib/config.ts`, `lib/schemas.ts` |
@@ -81,7 +81,7 @@ The **primary product** is the account manager plus the optional forwarding wrap
 | Quota runtime | `lib/quota-probe.ts`, `lib/quota-cache.ts`, `lib/quota-readiness.ts`, `lib/preemptive-quota-scheduler.ts`, `lib/parallel-probe.ts`, `lib/runtime/quota-*.ts` |
 | Resilience | `lib/live-account-sync.ts`, `lib/session-affinity.ts`, `lib/refresh-queue.ts`, `lib/refresh-lease.ts`, `lib/refresh-guardian.ts`, `lib/proactive-refresh.ts`, `lib/circuit-breaker.ts`, `lib/auth-rate-limit.ts` |
 | Context budget + overflow | `lib/context-budget-guard.ts`, `lib/context-budget/`, `lib/context-budget-response.ts`, `lib/context-overflow.ts`, `lib/synthetic-response.ts` |
-| Inference activity | `lib/inference-activity.ts` |
+| Inference activity | `lib/runtime/inference-activity.ts` |
 | Signal utilities | `lib/utils.ts` (`combineSignals` — `AbortSignal.any` replacement for Node ≥ 18.17) |
 | Integration snippets | `lib/integration-generators.ts`, `lib/codex-manager/commands/integrations.ts` |
 | Experimental chat-history sync | `lib/oc-chatgpt-import-adapter.ts`, `lib/oc-chatgpt-orchestrator.ts`, `lib/oc-chatgpt-target-detection.ts` |
@@ -101,7 +101,7 @@ The **primary product** is the account manager plus the optional forwarding wrap
 | Surface | Status |
 | --- | --- |
 | `index.ts` + `.` export | Plugin-host entry; kept working, not required for CLI use |
-| `.codex-plugin/plugin.json` | Scanner manifest; references `./skills/` which is **not** in `files[]` |
+| `.codex-plugin/plugin.json` | Scanner manifest; references `./skills/` (shipped in `files[]`) |
 | `config/*.json` templates | Optional plugin-host config examples |
 | `mcodex` | Convenience launcher only — must never grow account logic |
 | Compatibility argv aliases | Handled inside `scripts/codex-routing.js`; documented only in reference/troubleshooting/upgrade docs |

@@ -76,7 +76,7 @@ Details worth knowing:
 - **Auth before routing.** An unauthenticated request gets `401 runtime_rotation_proxy_unauthorized` before the path is even inspected.
 - **Redirects are never followed** (`redirect: "error"`), so a Bearer token cannot be exfiltrated to a redirected host.
 - **Failure is never a silent hang.** Transient failures rotate to another account; true exhaustion returns `503 codex_runtime_rotation_pool_exhausted` with per-account skip reasons and `retry_after_ms`, and points at `codex-multi-auth rotation status`.
-- **Two homes.** Non-interactive commands get a throwaway shadow `CODEX_HOME` (state synced back on exit). Interactive TUI, `resume`/`fork`, `app-server`, and `codex app` run against the canonical `CODEX_HOME` with the provider injected as `-c` overrides, so session history is not copied and reindexed on every launch.
+- **Two homes.** Non-interactive commands get a throwaway shadow `CODEX_HOME` (state synced back on exit). Interactive TUI, `resume`/`fork`, and `app-server` run against the canonical `CODEX_HOME` with the provider injected as `-c` overrides, so session history is not copied and reindexed on every launch. `codex app` also gets a shadow home through the app-helper context unless `CODEX_MULTI_AUTH_APP_ROTATION_USE_CANONICAL_HOME=1`.
 - **Opt-out.** `codex-multi-auth rotation disable` or `CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY=0` returns to plain forwarding.
 
 ### Account selection, in one breath
