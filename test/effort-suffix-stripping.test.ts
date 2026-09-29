@@ -103,7 +103,7 @@ describe("the four call sites agree on one key per model", () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			}),
-		).toBe("gpt-5.6-sol");
+		).toBe("gpt-6-sol");
 		expect(
 			resolveUnsupportedCodexFallbackModel({
 				requestedModel: "gpt-5.6-sol-ultra",
@@ -111,7 +111,7 @@ describe("the four call sites agree on one key per model", () => {
 				fallbackOnUnsupportedCodexModel: true,
 				fallbackToGpt52OnUnsupportedGpt53: true,
 			}),
-		).toBe("gpt-5.5");
+		).toBe("gpt-6-luna");
 	});
 
 	it("the fallback chain keeps Codex Max on its own row", () => {

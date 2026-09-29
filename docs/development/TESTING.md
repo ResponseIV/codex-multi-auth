@@ -111,7 +111,7 @@ Runtime rotation smoke:
 
 ```bash
 codex-multi-auth rotation status
-codex-multi-auth-codex exec "say hello" --model gpt-5.5
+codex-multi-auth-codex exec "say hello" --model gpt-6.1-sol
 ```
 
 For live smoke evidence, confirm the official Codex startup/status output shows provider `codex-multi-auth-runtime-proxy` on a localhost Responses URL. Account/quota failures after that point can still prove routing if the provider and localhost path are visible.

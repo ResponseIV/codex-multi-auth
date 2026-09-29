@@ -50,8 +50,8 @@ describe("codex.js wrapper — GPT-5.6 model resolution", () => {
 		expect(wrapper.normalizeRequestedModel("gpt-5.6-sol-2026-06-26")).toBe("gpt-5.6-sol");
 	});
 
-	it("leaves the legacy `gpt-5` alias alone and routes retired Codex Max to its replacement", () => {
-		expect(wrapper.normalizeRequestedModel("gpt-5")).toBe("gpt-5.5");
+	it("keeps the legacy `gpt-5` alias on the living 5.x flagship and routes retired Codex Max to its replacement", () => {
+		expect(wrapper.normalizeRequestedModel("gpt-5")).toBe("gpt-5.6-sol");
 		expect(wrapper.normalizeRequestedModel("gpt-5.1-codex-max")).toBe("gpt-5.6-sol");
 	});
 
@@ -69,10 +69,10 @@ describe("codex.js wrapper — GPT-5.6 model resolution", () => {
 });
 
 describe("codex.js wrapper — GPT-6 Astra and Daybreak resolution", () => {
-	it("maps the flagship and the long-horizon variant to their own ids", () => {
+	it("maps the flagship to its own id and the retired aeon slug to it", () => {
 		expect(wrapper.normalizeRequestedModel("gpt-6-astra")).toBe("gpt-6-astra");
 		expect(wrapper.normalizeRequestedModel("gpt-6-astra-aeon")).toBe(
-			"gpt-6-astra-aeon",
+			"gpt-6-astra",
 		);
 	});
 
@@ -82,7 +82,7 @@ describe("codex.js wrapper — GPT-6 Astra and Daybreak resolution", () => {
 		expect(wrapper.normalizeRequestedModel("openai/gpt-6")).toBe("gpt-6-astra");
 	});
 
-	it("resolves unrecognised GPT-6 ids to Astra, never silently to 5.5", () => {
+	it("resolves unrecognised GPT-6 ids to Astra, never silently to the default", () => {
 		expect(wrapper.normalizeRequestedModel("gpt-6-astra-pro")).toBe("gpt-6-astra");
 		expect(wrapper.normalizeRequestedModel("gpt-6-astra-2026-09-03")).toBe(
 			"gpt-6-astra",
@@ -132,8 +132,8 @@ describe("codex.js wrapper — GPT-6 Astra and Daybreak resolution", () => {
 		expect(wrapper.canonicalizeRequestedModelName("gpt-6-astra-max")).toBe(
 			"gpt-6-astra",
 		);
-		expect(wrapper.canonicalizeRequestedModelName("gpt-6-astra-aeon-ultra")).toBe(
-			"gpt-6-astra-aeon",
+		expect(wrapper.canonicalizeRequestedModelName("gpt-6.1-sol-ultra")).toBe(
+			"gpt-6.1-sol",
 		);
 	});
 });
@@ -156,10 +156,13 @@ describe("codex.js wrapper — reasoning-effort coercion", () => {
 		expect(wrapper.coerceReasoningEffortForModel("gpt-5.6-luna", "max")).toBe("max");
 	});
 
-	it("steps `max`/`ultra` down to the strongest tier a pre-5.6 model supports", () => {
-		expect(wrapper.coerceReasoningEffortForModel("gpt-5.5", "max")).toBe("xhigh");
-		expect(wrapper.coerceReasoningEffortForModel("gpt-5.5", "ultra")).toBe("xhigh");
-		expect(wrapper.coerceReasoningEffortForModel("gpt-5.5-pro", "ultra")).toBe("xhigh");
+	it("gives a retired 5.5-era id its replacement's effort ceiling", () => {
+		// `gpt-5.5` topped out at `xhigh`; it now runs on 6 Sol, which accepts
+		// `max` natively and `ultra` via the wire rewrite. `gpt-5.5-pro` runs on
+		// Astra, which takes the same ladder.
+		expect(wrapper.coerceReasoningEffortForModel("gpt-5.5", "max")).toBe("max");
+		expect(wrapper.coerceReasoningEffortForModel("gpt-5.5", "ultra")).toBe("max");
+		expect(wrapper.coerceReasoningEffortForModel("gpt-5.5-pro", "ultra")).toBe("max");
 	});
 
 	it("gives a retired id its replacement's effort ceiling", () => {
@@ -176,6 +179,15 @@ describe("codex.js wrapper — parity with lib/request/helpers/model-map", () =>
 	const MODEL_IDS = [
 		"gpt-6",
 		"gpt6",
+		"gpt-6.1",
+		"gpt-6.1-sol",
+		"gpt-6.1-sol-low",
+		"gpt-6.1-sol-ultra",
+		"gpt-6.1-sol-2026-09-29",
+		"gpt-6.1-luna",
+		"gpt6.1-sol",
+		"GPT 6.1 Sol",
+		"openai/gpt-6.1-sol",
 		"gpt-6-astra",
 		"gpt-6-astra-aeon",
 		"gpt-6-astra-max",
@@ -210,8 +222,11 @@ describe("codex.js wrapper — parity with lib/request/helpers/model-map", () =>
 		"gpt-5.6-terra-fast",
 		"openai/gpt-5.6",
 		"gpt-5",
+		"gpt-5-pro",
 		"gpt-5.5",
 		"gpt-5.5-pro",
+		"gpt-5.5-2026-04-23",
+		"gpt-5.5-high",
 		"gpt-5.4",
 		"gpt-5.4-mini",
 		"gpt-5.2",
@@ -231,6 +246,7 @@ describe("codex.js wrapper — parity with lib/request/helpers/model-map", () =>
 	const COERCION_MODELS = [
 		"gpt-6-astra",
 		"gpt-6-astra-aeon",
+		"gpt-6.1-sol",
 		"gpt-6-sol",
 		"gpt-6-luna",
 		"gpt-daybreak-blue-latest",
@@ -239,6 +255,7 @@ describe("codex.js wrapper — parity with lib/request/helpers/model-map", () =>
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
 		"gpt-5.5",
+		"gpt-5.5-pro",
 		"gpt-5.4",
 		"gpt-5.1",
 		"gpt-5.3-codex",
@@ -284,24 +301,11 @@ describe("codex.js wrapper — unsupported-model fallback chain parity", () => {
 	// unentitled account exited with the failure code while the plugin-host path
 	// retried, and docs advertised the retry for both.
 	//
-	// Pinned to the GPT-6 rows only. The two tables already diverge elsewhere
-	// (`gpt-5.3-codex` has a row in lib and none in the wrapper), which predates
-	// GPT-6 and is deliberately not asserted here.
-	const GPT6_ROWS = [
-		"gpt-6-astra",
-		"gpt-6-astra-aeon",
-		"gpt-6-sol",
-		"gpt-6-luna",
-		"gpt-5.6-sol",
-		"gpt-5.6-luna",
-	];
-
-	it.each(GPT6_ROWS)("wrapper carries the `%s` row lib has", (model) => {
-		const libRow = DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN[model];
-		expect(libRow, `lib lost its ${model} row`).toBeDefined();
-		expect(
-			wrapper.WRAPPER_UNSUPPORTED_MODEL_FALLBACK_CHAIN[model],
-			`wrapper is missing the ${model} row, so the CLI path will not retry it`,
-		).toEqual(libRow);
+	// The tables share the same explicit rows and spread the same retired map,
+	// so they must now be identical outright — not just on the GPT-6 rows.
+	it("carries the same fallback table as lib", () => {
+		expect(wrapper.WRAPPER_UNSUPPORTED_MODEL_FALLBACK_CHAIN).toEqual(
+			DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN,
+		);
 	});
 });

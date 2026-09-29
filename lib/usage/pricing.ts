@@ -1,4 +1,7 @@
-import { RETIRED_MODEL_REPLACEMENTS } from "../request/helpers/model-map.js";
+import {
+	getNormalizedModel,
+	RETIRED_MODEL_REPLACEMENTS,
+} from "../request/helpers/model-map.js";
 import type { UsageServiceTier, UsageTokenCounts } from "./types.js";
 
 export interface UsageModelPricing {
@@ -84,6 +87,37 @@ const MODEL_PRICING: Record<string, UsageModelPricing> = {
 			},
 		},
 	},
+	// GPT-6.1 Sol, published with the model on 2026-09-29: same $2 / $10 shape
+	// as 6 Sol but a cheaper cached-input rate ($0.10 vs $0.20) and a separate
+	// cache-write rate this table has no field for — cache writes bill as input
+	// here. Long-context (>272K input) doubles input and cache rates and
+	// multiplies output 1.5x; the Fast tier is the usual 2x.
+	"gpt-6.1-sol": {
+		inputUsdPerMillion: 2,
+		outputUsdPerMillion: 10,
+		cachedInputUsdPerMillion: 0.1,
+		reasoningUsdPerMillion: 10,
+		longContext: {
+			inputUsdPerMillion: 4,
+			outputUsdPerMillion: 15,
+			cachedInputUsdPerMillion: 0.2,
+			reasoningUsdPerMillion: 15,
+		},
+		serviceTiers: {
+			priority: {
+				inputUsdPerMillion: 4,
+				outputUsdPerMillion: 20,
+				cachedInputUsdPerMillion: 0.2,
+				reasoningUsdPerMillion: 20,
+				longContext: {
+					inputUsdPerMillion: 8,
+					outputUsdPerMillion: 30,
+					cachedInputUsdPerMillion: 0.4,
+					reasoningUsdPerMillion: 30,
+				},
+			},
+		},
+	},
 	// GPT-6 Sol and Luna, from the OpenAI API pricing page (read 2026-09-23;
 	// short- and long-context rows). Both publish a Fast tier at exactly 2x,
 	// like Astra.
@@ -139,12 +173,6 @@ const MODEL_PRICING: Record<string, UsageModelPricing> = {
 			},
 		},
 	},
-	"gpt-5.5": {
-		inputUsdPerMillion: 2,
-		outputUsdPerMillion: 12,
-		cachedInputUsdPerMillion: 0.2,
-		reasoningUsdPerMillion: 12,
-	},
 	"gpt-5.6-sol": {
 		inputUsdPerMillion: 5,
 		outputUsdPerMillion: 30,
@@ -180,16 +208,10 @@ const MODEL_PRICING: Record<string, UsageModelPricing> = {
  * in neither list.
  */
 export const UNPRICED_ROUTABLE_MODELS = [
-	// OpenAI published a rate for the Astra flagship at launch but not for the
-	// long-horizon `aeon` variant, and the Daybreak cyber models are sold under
-	// a separate controlled-access agreement with no public per-token rate.
-	// Pricing `aeon` off the flagship would be a guess on the model whose whole
-	// purpose is running for days, which is exactly where a wrong rate does the
-	// most damage.
-	"gpt-6-astra-aeon",
+	// The Daybreak cyber models are sold under a separate controlled-access
+	// agreement with no public per-token rate.
 	"gpt-daybreak-blue-latest",
 	"gpt-daybreak-red-latest",
-	"gpt-5.5-pro",
 ] as const;
 
 function normalizeModelName(model: string | null | undefined): string | null {
@@ -220,7 +242,13 @@ export function getUsageModelPricing(
 	// the ledger stores `costUsd` when a row is written and never re-prices it.
 	const effective = !/^(api|zdr)\//.test(model ?? "") && Object.hasOwn(RETIRED_MODEL_REPLACEMENTS, normalized)
 		? RETIRED_MODEL_REPLACEMENTS[normalized]
-		: normalized;
+		: // Bare aliases (`gpt-6.1`, `gpt-6`, `gpt-5.6`, `astra`) and
+			// effort-suffixed ids (`gpt-6.1-sol-max`) reach the ledger raw too;
+			// `getNormalizedModel` is the exact/alias-only resolver — NOT
+			// `resolveNormalizedModel`, which hands back DEFAULT_MODEL for
+			// anything unrecognized and would price an unknown model at the
+			// default's rate.
+			(getNormalizedModel(normalized) ?? normalized);
 	if (!effective || !Object.hasOwn(MODEL_PRICING, effective)) {
 		return null;
 	}

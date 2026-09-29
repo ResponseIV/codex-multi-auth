@@ -1405,12 +1405,25 @@ const DIRECT_UNSUPPORTED_MODEL_PATTERN =
 const CURRENT_CODEX_MODEL = "gpt-5.6-sol";
 const CODEX_MINI_REPLACEMENT_MODEL = "gpt-5.6-terra";
 const RETIRED_MODEL_REPLACEMENTS = {
+	// `gpt-6-astra-aeon` never appeared in the bundled Codex catalog or the
+	// public model docs — a Statsig-flag leak, now dead — so it aliases the
+	// flagship it was a variant of.
+	"gpt-6-astra-aeon": "gpt-6-astra",
+	// `gpt-5.5` leaves ChatGPT/Codex OAuth on 2026-10-14 (the catalog names
+	// GPT-6 Sol as the migration target); `gpt-5.5-pro` left the bundled
+	// catalog earlier and is API-only, so it goes to the frontier flagship.
+	"gpt-5.5": "gpt-6-sol",
+	"gpt-5.5-2026-04-23": "gpt-6-sol",
+	"gpt-5.5-20260423": "gpt-6-sol",
+	"gpt-5.5-pro": "gpt-6-astra",
+	"gpt-5.5-pro-2026-04-23": "gpt-6-astra",
+	"gpt-5.5-pro-20260423": "gpt-6-astra",
 	"gpt-5.4": "gpt-6-sol",
 	"gpt-5.4-mini": "gpt-6-luna",
 	"gpt-5.4-nano": "gpt-6-luna",
-	"gpt-5.4-pro": "gpt-5.5-pro",
+	"gpt-5.4-pro": "gpt-6-astra",
 	"gpt-5.2": "gpt-5.6-sol",
-	"gpt-5.2-pro": "gpt-5.5-pro",
+	"gpt-5.2-pro": "gpt-6-astra",
 	"gpt-5.1": "gpt-5.6-sol",
 	"gpt-5-mini": "gpt-5.6-terra",
 	"gpt-5-nano": "gpt-5.6-luna",
@@ -1429,30 +1442,26 @@ const RETIRED_MODEL_REPLACEMENTS = {
 	"gpt-5-codex-mini": CODEX_MINI_REPLACEMENT_MODEL,
 	"codex-mini-latest": CODEX_MINI_REPLACEMENT_MODEL,
 };
-// Mirrors the GPT-6 rows of lib/request/error-classification.ts
+// Mirrors lib/request/error-classification.ts
 // `DEFAULT_UNSUPPORTED_CODEX_FALLBACK_CHAIN`. This table is walked differently
 // from lib's: `resolveUnsupportedModelRetryTarget` keys on the model named in
 // the error output and falls back to the original requested model, with
 // `attemptedModels` accumulating, so a row's later entries ARE reachable here.
-// The two tables are not identical today (`gpt-5.3-codex` has a row in lib and
-// not here), which predates GPT-6 and is left alone; the GPT-6 rows are pinned
-// in parity by test/codex-model-resolution.test.ts.
+// The explicit rows and the retired-id spread are pinned in parity by
+// test/codex-model-resolution.test.ts; `gpt-6-luna` closes the general walks
+// because it ships on the most plans of any catalog model.
 const WRAPPER_UNSUPPORTED_MODEL_FALLBACK_CHAIN = {
-	"gpt-6-astra": ["gpt-5.6-sol", "gpt-5.5"],
-	"gpt-6-astra-aeon": ["gpt-6-astra", "gpt-5.6-sol"],
+	"gpt-6.1-sol": ["gpt-6-sol"],
+	"gpt-6-astra": ["gpt-6-sol"],
 	"gpt-6-sol": ["gpt-5.6-sol"],
 	"gpt-6-luna": ["gpt-5.6-luna"],
-	"gpt-5.6-sol": ["gpt-5.5"],
-	"gpt-5.6-luna": ["gpt-5.5"],
-	"gpt-5.6-terra": ["gpt-5.5"],
-	"gpt-5": ["gpt-5.5"],
-	"gpt-5-pro": ["gpt-5.5-pro"],
-	"gpt-5.5-2026-04-23": ["gpt-5.5"],
-	"gpt-5.5-20260423": ["gpt-5.5"],
-	"gpt-5.5-pro-2026-04-23": ["gpt-5.5-pro"],
-	"gpt-5.5-pro-20260423": ["gpt-5.5-pro"],
-	// `gpt-5.5`/`gpt-5.5-pro` are the floor; `gpt-5.4` is retired. A retired id
-	// steps once to its replacement.
+	"gpt-5.6-sol": ["gpt-6-luna"],
+	"gpt-5.6-luna": ["gpt-5.6-sol"],
+	"gpt-5.6-terra": ["gpt-5.6-sol"],
+	"gpt-5": ["gpt-5.6-sol"],
+	"gpt-5-pro": ["gpt-6-astra"],
+	// A retired id still reaches the backend verbatim and is rejected; one hop
+	// to its named replacement turns that into a working request.
 	...Object.fromEntries(
 		Object.entries(RETIRED_MODEL_REPLACEMENTS).map(([retired, replacement]) => [
 			retired,
@@ -2068,7 +2077,11 @@ async function forwardToRealCodex(codexBin, rawArgs, baseEnv = process.env) {
 	let lastExitCode = 1;
 	const attemptedModels = new Set();
 
-	for (let attempt = 0; attempt < 4; attempt += 1) {
+	// Five forwards: the deepest supported-model staircase (gpt-6.1-sol ->
+	// gpt-6-sol -> gpt-5.6-sol -> gpt-6-luna -> gpt-5.6-luna) spends exactly
+	// the shared per-request attempt budget of 5 the plugin host uses. With 4
+	// the terminal model was unreachable from the new default.
+	for (let attempt = 0; attempt < 5; attempt += 1) {
 		const requestedModel = extractRequestedModel(currentArgs);
 		if (requestedModel) {
 			attemptedModels.add(requestedModel);
@@ -2169,7 +2182,7 @@ function hasCliAuthCredentialsStoreOverride(args) {
 // This wrapper runs before the TypeScript build, so it cannot import that source.
 const SUPPORTED_REASONING_EFFORTS_BY_MODEL = {
 	"gpt-6-astra": ["low", "medium", "high", "xhigh", "max", "ultra"],
-	"gpt-6-astra-aeon": ["low", "medium", "high", "xhigh", "max", "ultra"],
+	"gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
 	"gpt-6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
 	"gpt-6-luna": ["low", "medium", "high", "xhigh", "max"],
 	"gpt-daybreak-blue-latest": ["low", "medium", "high", "xhigh", "max", "ultra"],
@@ -2177,8 +2190,6 @@ const SUPPORTED_REASONING_EFFORTS_BY_MODEL = {
 	"gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
 	"gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],
 	"gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-	"gpt-5.5": ["none", "low", "medium", "high", "xhigh"],
-	"gpt-5.5-pro": ["medium", "high", "xhigh"],
 };
 
 const REASONING_FALLBACKS = {
@@ -2209,13 +2220,9 @@ const REASONING_ALIAS_VARIANTS = [
 	"xhigh",
 ];
 const REQUESTED_MODEL_ALIASES = new Map();
-const DEFAULT_GENERAL_GPT5_MODEL = "gpt-5.5";
-const GPT_5_5_CANONICAL_MODEL = "gpt-5.5";
-const GPT_5_5_PRO_CANONICAL_MODEL = "gpt-5.5-pro";
-const GPT_5_5_RELEASE_MODEL = "gpt-5.5-2026-04-23";
-const GPT_5_5_PRO_RELEASE_MODEL = "gpt-5.5-pro-2026-04-23";
-const GPT_5_5_RELEASE_COMPAT_MODEL = "gpt-5.5-20260423";
-const GPT_5_5_PRO_RELEASE_COMPAT_MODEL = "gpt-5.5-pro-20260423";
+// The general GPT-5 landing spot: with 5.5 retired, the newest living 5.x
+// flagship is 5.6 Sol. Mirrors lib/request/helpers/model-map.ts.
+const DEFAULT_GENERAL_GPT5_MODEL = "gpt-5.6-sol";
 // GPT-5.6 tiers. Sol and Terra expose `ultra`; Luna stops at `max`. No tier
 // accepts `none`/`minimal`. Bare `gpt-5.6` aliases to the flagship (Sol).
 const GPT_5_6_SOL_MODEL = "gpt-5.6-sol";
@@ -2224,11 +2231,11 @@ const GPT_5_6_LUNA_MODEL = "gpt-5.6-luna";
 const GPT_5_6_FLAGSHIP_ALIAS = "gpt-5.6";
 const GPT_5_6_SOL_TERRA_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
 const GPT_5_6_LUNA_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-// GPT-6 Astra (2026-09-03): the flagship plus `aeon`, a long-horizon variant.
-// Same frontier effort ladder as 5.6 (no `none`/`minimal`, `ultra` at the
-// top). Bare `gpt-6` -> flagship.
+// GPT-6 Astra (2026-09-03): the frontier flagship. Same frontier effort
+// ladder as 5.6 (no `none`/`minimal`, `ultra` at the top). Bare `gpt-6` ->
+// flagship. The leaked `aeon` long-horizon variant was never catalog-listed
+// and is retired; its ids alias the flagship.
 const GPT_6_ASTRA_MODEL = "gpt-6-astra";
-const GPT_6_ASTRA_AEON_MODEL = "gpt-6-astra-aeon";
 const GPT_6_FLAGSHIP_ALIAS = "gpt-6";
 const GPT_6_ASTRA_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
 // GPT-6 Sol and Luna (upstream catalog, 2026-09-22). Sol reaches `ultra`, Luna
@@ -2237,6 +2244,12 @@ const GPT_6_SOL_MODEL = "gpt-6-sol";
 const GPT_6_LUNA_MODEL = "gpt-6-luna";
 const GPT_6_SOL_EFFORTS = GPT_6_ASTRA_EFFORTS;
 const GPT_6_LUNA_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// GPT-6.1 Sol (upstream catalog, 2026-09-29): the first 6.1 release, added as
+// the catalog's default model. Sol is the only 6.1 tier yet, so bare `gpt-6.1`
+// aliases to it, matching the bare-alias convention.
+const GPT_6_1_SOL_MODEL = "gpt-6.1-sol";
+const GPT_6_1_FLAGSHIP_ALIAS = "gpt-6.1";
+const GPT_6_1_SOL_EFFORTS = GPT_6_ASTRA_EFFORTS;
 // Daybreak cyber models from the upstream Codex catalog. `red` is the
 // cyber-permissive variant, `blue` the defensive one.
 const DAYBREAK_BLUE_MODEL = "gpt-daybreak-blue-latest";
@@ -2246,29 +2259,37 @@ const DAYBREAK_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"];
 const GENERAL_GPT5_VERSION_CATALOG = {
 	1: {
 		base: GPT_5_6_SOL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 	},
 	2: {
 		base: GPT_5_6_SOL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 	},
 	4: {
 		base: GPT_6_SOL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 		mini: GPT_6_LUNA_MODEL,
 		nano: GPT_6_LUNA_MODEL,
 	},
 	5: {
-		base: GPT_5_5_CANONICAL_MODEL,
-		pro: GPT_5_5_PRO_CANONICAL_MODEL,
+		base: GPT_6_SOL_MODEL,
+		pro: GPT_6_ASTRA_MODEL,
 		mini: GPT_5_6_TERRA_MODEL,
 		nano: GPT_5_6_LUNA_MODEL,
 	},
 };
-const GENERAL_GPT5_STABLE_VARIANTS = GENERAL_GPT5_VERSION_CATALOG[5];
+// Unknown future 5.x minors land on the newest generation the line still
+// serves — deliberately NOT `gpt-6-sol`, since an id naming a 5.x minor keeps
+// its generation. Mirrors lib GENERAL_GPT5_STABLE_VARIANTS.
+const GENERAL_GPT5_STABLE_VARIANTS = {
+	base: GPT_5_6_SOL_MODEL,
+	pro: GPT_6_ASTRA_MODEL,
+	mini: GPT_5_6_TERRA_MODEL,
+	nano: GPT_5_6_LUNA_MODEL,
+};
 const GENERAL_GPT5_GENERIC_VARIANTS = {
 	base: DEFAULT_GENERAL_GPT5_MODEL,
-	pro: GPT_5_5_PRO_CANONICAL_MODEL,
+	pro: GPT_6_ASTRA_MODEL,
 	mini: GPT_5_6_TERRA_MODEL,
 	nano: GPT_5_6_LUNA_MODEL,
 };
@@ -2390,31 +2411,10 @@ function renameFileWithRetry(sourcePath, destinationPath, expectedDestinationSta
 }
 
 function seedRequestedModelAliases() {
-	addRequestedModelReasoningAliases(
-		GPT_5_5_CANONICAL_MODEL,
-		GPT_5_5_CANONICAL_MODEL,
-	);
-	addRequestedModelReasoningAliases(
-		GPT_5_5_RELEASE_MODEL,
-		GPT_5_5_CANONICAL_MODEL,
-	);
-	addRequestedModelReasoningAliases(
-		GPT_5_5_RELEASE_COMPAT_MODEL,
-		GPT_5_5_CANONICAL_MODEL,
-	);
-	addRequestedModelReasoningAliases(
-		GPT_5_5_PRO_CANONICAL_MODEL,
-		GPT_5_5_PRO_CANONICAL_MODEL,
-	);
-	addRequestedModelReasoningAliases(
-		GPT_5_5_PRO_RELEASE_MODEL,
-		GPT_5_5_PRO_CANONICAL_MODEL,
-	);
-	addRequestedModelReasoningAliases(
-		GPT_5_5_PRO_RELEASE_COMPAT_MODEL,
-		GPT_5_5_PRO_CANONICAL_MODEL,
-	);
-	addRequestedModelReasoningAliases("gpt-5-pro", GPT_5_5_PRO_CANONICAL_MODEL);
+	// `gpt-5` and `gpt-5-pro` are the last un-versioned ids upstream published;
+	// with 5.5 retired the 5.x flagship is Sol 5.6 and the pro tier is Astra.
+	// 5.5's own dated and suffixed forms come from the retired table below.
+	addRequestedModelReasoningAliases("gpt-5-pro", GPT_6_ASTRA_MODEL);
 	addRequestedModelReasoningAliases("gpt-5", DEFAULT_GENERAL_GPT5_MODEL);
 	addRequestedModelEffortAliases(
 		GPT_5_6_SOL_MODEL,
@@ -2442,19 +2442,17 @@ function seedRequestedModelAliases() {
 		GPT_6_ASTRA_EFFORTS,
 	);
 	addRequestedModelEffortAliases(
-		GPT_6_ASTRA_AEON_MODEL,
-		GPT_6_ASTRA_AEON_MODEL,
-		GPT_6_ASTRA_EFFORTS,
-	);
-	addRequestedModelEffortAliases(
 		GPT_6_FLAGSHIP_ALIAS,
 		GPT_6_ASTRA_MODEL,
 		GPT_6_ASTRA_EFFORTS,
 	);
 	addRequestedModelEffortAliases("astra", GPT_6_ASTRA_MODEL, GPT_6_ASTRA_EFFORTS);
+	// `astra-aeon` was only ever a leaked slug and is retired now, so the name
+	// resolves to the flagship. Its `gpt-6-astra-aeon` form comes from the
+	// retired table, not from a dedicated registration.
 	addRequestedModelEffortAliases(
 		"astra-aeon",
-		GPT_6_ASTRA_AEON_MODEL,
+		GPT_6_ASTRA_MODEL,
 		GPT_6_ASTRA_EFFORTS,
 	);
 	// No bare `sol`/`luna` aliases: those already mean the 5.6 tiers.
@@ -2463,6 +2461,16 @@ function seedRequestedModelAliases() {
 		GPT_6_LUNA_MODEL,
 		GPT_6_LUNA_MODEL,
 		GPT_6_LUNA_EFFORTS,
+	);
+	addRequestedModelEffortAliases(
+		GPT_6_1_SOL_MODEL,
+		GPT_6_1_SOL_MODEL,
+		GPT_6_1_SOL_EFFORTS,
+	);
+	addRequestedModelEffortAliases(
+		GPT_6_1_FLAGSHIP_ALIAS,
+		GPT_6_1_SOL_MODEL,
+		GPT_6_1_SOL_EFFORTS,
 	);
 	addRequestedModelEffortAliases(
 		DAYBREAK_BLUE_MODEL,
@@ -2556,23 +2564,28 @@ function resolveCodexRequestedModel(normalized) {
 // Resolve GPT-6 identifiers that are not exact aliases (a dated snapshot, the
 // `gpt-6-astra-pro` plan tier, or a tier OpenAI adds later). Without this the
 // general GPT-5 resolver never matches (it needs a `gpt 5` token pair) and the
-// id falls through to 5.5 — running GPT-5.5 for a caller who asked for the
-// frontier model. `aeon` keeps its own id because it is a behaviourally
-// different model, not a rename. Mirrors lib/request/helpers/model-map.ts.
+// id falls through to the default — running 6.1 Sol for a caller who asked for
+// a different model. `aeon` resolves to the flagship it was a leaked variant
+// of. Mirrors lib/request/helpers/model-map.ts.
 function resolveGpt6RequestedModel(stripped) {
 	const tokens = tokenizeRequestedModel(stripped);
 	const gptIndex = tokens.indexOf("gpt");
-	// `gpt6` with no separator tokenizes as one token, so the `gpt` + `6` pair
-	// never forms; mirror lib and claim it here.
 	const versionToken = gptIndex === -1 ? undefined : tokens[gptIndex + 1];
 	// `gpt6` with no separator tokenizes as one token, so the `gpt` + `6` pair
 	// never forms; mirror lib and claim it here.
-	const isGpt6 = versionToken === "6" || tokens.includes("gpt6");
+	const gpt6Index = tokens.indexOf("gpt6");
+	const isGpt6 = versionToken === "6" || gpt6Index !== -1;
+	// A 6.1 minor shows up as the token after `6` (`gpt-6.1-sol`) or after
+	// `gpt6` (`gpt6.1-sol`); both forms land on the 6.1 generation, not on the
+	// 6.0 tier the trailing `sol`/`luna` tokens name.
+	const isGpt61 =
+		(isGpt6 && gptIndex !== -1 && tokens[gptIndex + 2] === "1") ||
+		(gpt6Index !== -1 && tokens[gpt6Index + 1] === "1");
 	// A bare `astra` token counts too: picker labels and OpenAI's own material
 	// say "Astra" with no `gpt-6` prefix, so `Astra Pro` arrives with no version
-	// tokens and would otherwise miss every branch and land on 5.5. Anchored so
-	// an id naming a different GPT major version, `gpt-4-astra-x`, is not
-	// claimed for the frontier model.
+	// tokens and would otherwise miss every branch and land on the default.
+	// Anchored so an id naming a different GPT major version, `gpt-4-astra-x`,
+	// is not claimed for the frontier model.
 	const namesOtherGptVersion =
 		versionToken !== undefined &&
 		/^\d+$/.test(versionToken) &&
@@ -2581,8 +2594,10 @@ function resolveGpt6RequestedModel(stripped) {
 	if ((!isGpt6 && !isAstra) || tokens.includes("codex")) {
 		return "";
 	}
-	if (tokens.includes("aeon")) return GPT_6_ASTRA_AEON_MODEL;
+	if (tokens.includes("aeon")) return GPT_6_ASTRA_MODEL;
 	if (isAstra) return GPT_6_ASTRA_MODEL;
+	// Every unrecognised 6.1 id resolves to the generation's only tier, Sol.
+	if (isGpt61) return GPT_6_1_SOL_MODEL;
 	// `terra` goes to Sol: there is no GPT-6 Terra, and upstream migrates
 	// `gpt-5.6-terra` users to Sol.
 	if (tokens.includes("luna")) return GPT_6_LUNA_MODEL;

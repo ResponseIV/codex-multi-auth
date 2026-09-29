@@ -18,11 +18,14 @@ describe("model map", () => {
 			expect(MODEL_MAP["codex-mini-latest"]).toBe("gpt-5.6-terra");
 		});
 
-		it("keeps GPT-5.5 aliases canonical and routes retired general models to their replacements", () => {
-			expect(MODEL_MAP["gpt-5.5"]).toBe("gpt-5.5");
-			expect(MODEL_MAP["gpt-5.5-pro-high"]).toBe("gpt-5.5-pro");
+		it("routes retired general models to their named replacements", () => {
+			expect(MODEL_MAP["gpt-5.5"]).toBe("gpt-6-sol");
+			expect(MODEL_MAP["gpt-5.5-pro-high"]).toBe("gpt-6-astra");
+			expect(MODEL_MAP["gpt-6-astra-aeon"]).toBe("gpt-6-astra");
 			expect(MODEL_MAP["gpt-5.4"]).toBe("gpt-6-sol");
-			expect(MODEL_MAP["gpt-5"]).toBe("gpt-5.5");
+			expect(MODEL_MAP["gpt-5"]).toBe("gpt-5.6-sol");
+			expect(MODEL_MAP["gpt-6.1-sol"]).toBe("gpt-6.1-sol");
+			expect(MODEL_MAP["gpt-6.1"]).toBe("gpt-6.1-sol");
 		});
 
 		it("routes retired mini and nano ids to their named replacements", () => {
@@ -40,10 +43,10 @@ describe("model map", () => {
 
 	describe("getNormalizedModel", () => {
 		it("returns exact aliases case-insensitively", () => {
-			expect(getNormalizedModel("GPT-5.5")).toBe("gpt-5.5");
-			expect(getNormalizedModel("GPT-5.5-PRO-HIGH")).toBe("gpt-5.5-pro");
+			expect(getNormalizedModel("GPT-5.5")).toBe("gpt-6-sol");
+			expect(getNormalizedModel("GPT-5.5-PRO-HIGH")).toBe("gpt-6-astra");
 			expect(getNormalizedModel("GPT-5.4")).toBe("gpt-6-sol");
-			expect(getNormalizedModel("GPT-5.4-PRO-HIGH")).toBe("gpt-5.5-pro");
+			expect(getNormalizedModel("GPT-5.4-PRO-HIGH")).toBe("gpt-6-astra");
 			expect(getNormalizedModel("gpt-5.4-mini")).toBe("gpt-6-luna");
 			expect(getNormalizedModel("gpt-5.3-codex-high")).toBe("gpt-5.6-sol");
 			expect(getNormalizedModel("gpt-5-chat-latest-high")).toBe("gpt-5.6-sol");
@@ -62,26 +65,26 @@ describe("model map", () => {
 
 	describe("resolveNormalizedModel", () => {
 		it("resolves provider-prefixed and verbose GPT-5 variants", () => {
-			expect(resolveNormalizedModel("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
-			expect(resolveNormalizedModel("openai/gpt-5.5-20260423")).toBe("gpt-5.5");
-			expect(resolveNormalizedModel("GPT 5.5 Pro High")).toBe("gpt-5.5-pro");
+			expect(resolveNormalizedModel("openai/gpt-5.5-2026-04-23")).toBe("gpt-6-sol");
+			expect(resolveNormalizedModel("openai/gpt-5.5-20260423")).toBe("gpt-6-sol");
+			expect(resolveNormalizedModel("GPT 5.5 Pro High")).toBe("gpt-6-astra");
 			expect(resolveNormalizedModel("openai/gpt-5.4")).toBe("gpt-6-sol");
 			expect(resolveNormalizedModel("openai/gpt-5.4-mini-high")).toBe("gpt-6-luna");
-			expect(resolveNormalizedModel("GPT 5.4 Pro High")).toBe("gpt-5.5-pro");
+			expect(resolveNormalizedModel("GPT 5.4 Pro High")).toBe("gpt-6-astra");
 			expect(resolveNormalizedModel("GPT 5 Codex Low (ChatGPT Subscription)")).toBe("gpt-5.6-sol");
 			expect(resolveNormalizedModel("GPT 5.1 Codex Mini")).toBe("gpt-5.6-terra");
 		});
 
-		it("defaults unknown GPT-5-ish requests to GPT-5.5 instead of GPT-5.1", () => {
-			expect(resolveNormalizedModel("gpt-5-unknown-preview")).toBe("gpt-5.5");
-			expect(resolveNormalizedModel("gpt 5 experimental build")).toBe("gpt-5.5");
+		it("defaults unknown GPT-5-ish requests to the living 5.x flagship", () => {
+			expect(resolveNormalizedModel("gpt-5-unknown-preview")).toBe("gpt-5.6-sol");
+			expect(resolveNormalizedModel("gpt 5 experimental build")).toBe("gpt-5.6-sol");
 		});
 
-		it("keeps GPT-5.5 aliases first-class while preserving fallback routing for unknown GPT-5 names", () => {
-			expect(resolveNormalizedModel("gpt-5.5")).toBe("gpt-5.5");
-			expect(resolveNormalizedModel("gpt-5.5-high")).toBe("gpt-5.5");
+		it("routes retired 5.5-era aliases to their replacements while preserving fallback routing for unknown GPT-5 names", () => {
+			expect(resolveNormalizedModel("gpt-5.5")).toBe("gpt-6-sol");
+			expect(resolveNormalizedModel("gpt-5.5-high")).toBe("gpt-6-sol");
 			expect(resolveNormalizedModel("openai/gpt-5.5-pro-high")).toBe(
-				"gpt-5.5-pro",
+				"gpt-6-astra",
 			);
 		});
 
@@ -107,13 +110,20 @@ describe("model map", () => {
 		});
 
 		it("exposes tool-search and computer-use capabilities", () => {
+			expect(getModelCapabilities("gpt-6.1-sol")).toEqual({
+				toolSearch: true,
+				computerUse: true,
+				compaction: true,
+			});
 			expect(getModelCapabilities("gpt-5.5")).toEqual({
 				toolSearch: true,
 				computerUse: true,
 				compaction: true,
 			});
+			// Retired pro ids take Astra's full capability set — the `toolSearch:
+			// false` they carried as API-only models does not follow them.
 			expect(getModelCapabilities("gpt-5.5-pro")).toEqual({
-				toolSearch: false,
+				toolSearch: true,
 				computerUse: true,
 				compaction: true,
 			});
@@ -123,7 +133,7 @@ describe("model map", () => {
 				compaction: true,
 			});
 			expect(getModelCapabilities("gpt-5.4-pro")).toEqual({
-				toolSearch: false,
+				toolSearch: true,
 				computerUse: true,
 				compaction: true,
 			});

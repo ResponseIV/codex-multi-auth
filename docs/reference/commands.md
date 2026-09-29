@@ -152,7 +152,7 @@ All governance state is file-backed under `~/.codex/multi-auth`.
 `rotation reset-runtime`; the row above is the documentation-test anchor list.
 
 Default live-probe model when `--model` is omitted is `gpt-5.6-sol`
-(`DEFAULT_PROBE_MODEL`); request routing defaults to `gpt-5.5` (`DEFAULT_MODEL`).
+(`DEFAULT_PROBE_MODEL`); request routing defaults to `gpt-6.1-sol` (`DEFAULT_MODEL`).
 
 ---
 
@@ -932,7 +932,7 @@ Repair and recovery:
 
 ```bash
 codex-multi-auth fix --dry-run
-codex-multi-auth fix --live --model gpt-5.5
+codex-multi-auth fix --live --model gpt-6.1-sol
 codex-multi-auth doctor --fix
 ```
 

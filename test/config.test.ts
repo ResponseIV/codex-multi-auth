@@ -103,18 +103,21 @@ describe('Configuration Parsing', () => {
 			const warnSpy = vi.spyOn(logger, 'logWarn').mockImplementation(() => {});
 
 			try {
-				// gpt-5.5-pro accepts only medium/high/xhigh.
+				// gpt-5.5-pro now runs on gpt-6-astra, whose ladder starts at low;
+				// `none` is what it cannot accept.
 				const proReasoning = getReasoningConfig('gpt-5.5-pro', {
-					reasoningEffort: 'low',
+					reasoningEffort: 'none',
 				});
 
-				expect(proReasoning.effort).toBe('medium');
+				expect(proReasoning.effort).toBe('low');
 				expect(warnSpy).toHaveBeenCalledWith(
 					'Coercing unsupported reasoning effort for model',
 					expect.objectContaining({
-						model: 'gpt-5.5-pro',
-						requestedEffort: 'low',
-						effectiveEffort: 'medium',
+						// The warn names the normalized model the effort was checked
+						// against, not the retired alias the caller sent.
+						model: 'gpt-6-astra',
+						requestedEffort: 'none',
+						effectiveEffort: 'low',
 					}),
 				);
 			} finally {
@@ -142,9 +145,9 @@ describe('Configuration Parsing', () => {
 			expect(gpt54Reasoning.effort).toBe('medium');
 		});
 
-		it('should default the GPT-5.5 release alias to none reasoning', () => {
+		it('should default the retired GPT-5.5 alias to the medium default of GPT-6 Sol, its replacement', () => {
 			const gpt55Reasoning = getReasoningConfig('gpt-5.5', {});
-			expect(gpt55Reasoning.effort).toBe('none');
+			expect(gpt55Reasoning.effort).toBe('medium');
 		});
 
 		it('should handle high effort setting', () => {
@@ -215,21 +218,21 @@ describe('Configuration Parsing', () => {
 
 		it('should handle standard gpt-5 model', () => {
 			const gpt5Reasoning = getReasoningConfig('gpt-5', {});
-			expect(gpt5Reasoning.effort).toBe('none');
+			expect(gpt5Reasoning.effort).toBe('low');
 		});
 
-		it('should clamp unsupported low effort on GPT-5.4-pro up to medium', () => {
+		it('should clamp unsupported none effort on GPT-5.4-pro up to low', () => {
 			const gpt54ProReasoning = getReasoningConfig('gpt-5.4-pro', {
-				reasoningEffort: 'low',
+				reasoningEffort: 'none',
 			});
-			expect(gpt54ProReasoning.effort).toBe('medium');
+			expect(gpt54ProReasoning.effort).toBe('low');
 		});
 
-		it('should clamp unsupported low effort on GPT-5.5-pro up to medium', () => {
+		it('should clamp unsupported none effort on GPT-5.5-pro up to low', () => {
 			const gpt55ProReasoning = getReasoningConfig('gpt-5.5-pro', {
-				reasoningEffort: 'low',
+				reasoningEffort: 'none',
 			});
-			expect(gpt55ProReasoning.effort).toBe('medium');
+			expect(gpt55ProReasoning.effort).toBe('low');
 		});
 	});
 });

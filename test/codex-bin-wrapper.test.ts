@@ -2831,17 +2831,18 @@ describe("codex bin wrapper", () => {
 		const controlledTmp = join(fixtureRoot, "tmp");
 		mkdirSync(originalHome, { recursive: true });
 		mkdirSync(controlledTmp, { recursive: true });
-		// `--model gpt-5.5` coerces `max` down to `xhigh`, which is the only thing
-		// that makes `createCompatibilityCodexHome` build a shadow mirror at all.
+		// `--model gpt-6-luna` coerces `ultra` down to `max` (Luna's ladder stops
+		// at max), which is the only thing that makes
+		// `createCompatibilityCodexHome` build a shadow mirror at all.
 		writeFileSync(
 			join(originalHome, "config.toml"),
-			'model_provider = "openai"\nmodel_reasoning_effort = "max"\n',
+			'model_provider = "openai"\nmodel_reasoning_effort = "ultra"\n',
 			"utf8",
 		);
 
 		const result = runWrapper(
 			fixtureRoot,
-			["app-server", "--listen", "stdio://", "--model", "gpt-5.5"],
+			["app-server", "--listen", "stdio://", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -4450,8 +4451,8 @@ describe("codex bin wrapper", () => {
 		if (result.status !== 0) {
 			throw new Error(output);
 		}
-		expect(output).toContain("Retrying with gpt-5.5");
-		expect(output).toContain("FORWARDED:app . --model gpt-5.5");
+		expect(output).toContain("Retrying with gpt-6-luna");
+		expect(output).toContain("FORWARDED:app . --model gpt-6-luna");
 		const markerAfterRetry = readFileSync(markerPath, "utf8")
 			.trim()
 			.split(/\r?\n/);
@@ -4499,11 +4500,11 @@ describe("codex bin wrapper", () => {
 		mkdirSync(originalHome, { recursive: true });
 		writeFileSync(
 			join(originalHome, "config.toml"),
-			'model_reasoning_effort = "max"\n',
+			'model_reasoning_effort = "ultra"\n',
 			"utf8",
 		);
 
-		const result = runWrapper(fixtureRoot, ["app", ".", "--model", "gpt-5.5"], {
+		const result = runWrapper(fixtureRoot, ["app", ".", "--model", "gpt-6-luna"], {
 			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 			CODEX_HOME: originalHome,
 			CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
@@ -4517,7 +4518,7 @@ describe("codex bin wrapper", () => {
 		if (result.status !== 0) {
 			throw new Error(output);
 		}
-		expect(output).toContain("FORWARDED:app . --model gpt-5.5");
+		expect(output).toContain("FORWARDED:app . --model gpt-6-luna");
 		expect(output).toContain(
 			`CODEX_MULTI_AUTH_DIR:${join(originalHome, "multi-auth")}`,
 		);
@@ -5835,17 +5836,17 @@ describe("codex bin wrapper", () => {
 		writeFileSync(
 			join(originalHome, "config.toml"),
 			[
-				'model_reasoning_effort = "max"',
+				'model_reasoning_effort = "ultra"',
 				'profile = "legacy-full-access"',
 				"",
 				'[profiles."legacy-full-access"]',
-				'model_reasoning_effort = "max"',
+				'model_reasoning_effort = "ultra"',
 				"",
 			].join("\n"),
 			"utf8",
 		);
 
-		const result = runWrapper(fixtureRoot, ["exec", "status", "--model", "gpt-5.5"], {
+		const result = runWrapper(fixtureRoot, ["exec", "status", "--model", "gpt-6-luna"], {
 			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 			CODEX_HOME: originalHome,
 			CODEX_MULTI_AUTH_DIR: undefined,
@@ -5853,15 +5854,15 @@ describe("codex bin wrapper", () => {
 
 		expect(result.status).toBe(0);
 		const output = combinedOutput(result);
-		expect(output).toContain('FORWARDED:exec status --model gpt-5.5 -c cli_auth_credentials_store="file"');
+		expect(output).toContain('FORWARDED:exec status --model gpt-6-luna -c cli_auth_credentials_store="file"');
 		expect(output).not.toContain(`CODEX_HOME:${originalHome}`);
 		expect(output).toContain("CODEX_MULTI_AUTH_DIR_JSON:null");
 		expect(output).toContain("AUTH_EXISTS:true");
 		expect(output).toContain("AUTH_JSON:{}");
 		expect(output).toContain("AUTH_MODE:");
-		expect(output).toContain('model_reasoning_effort = "xhigh"');
+		expect(output).toContain('model_reasoning_effort = "max"');
 		expect(output).toContain("CONFIG_MODE:");
-		expect(output).not.toContain('model_reasoning_effort = "max"');
+		expect(output).not.toContain('model_reasoning_effort = "ultra"');
 		if (process.platform !== "win32") {
 			expect(output).toContain("AUTH_MODE:600");
 			expect(output).toContain("CONFIG_MODE:600");
@@ -5880,13 +5881,13 @@ describe("codex bin wrapper", () => {
 		mkdirSync(join(originalHome, "accounts.json"), { recursive: true });
 		writeFileSync(
 			join(originalHome, "config.toml"),
-			'model_reasoning_effort = "max"\n',
+			'model_reasoning_effort = "ultra"\n',
 			"utf8",
 		);
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -5922,9 +5923,9 @@ describe("codex bin wrapper", () => {
 		mkdirSync(join(originalHome, "sessions"), { recursive: true });
 		mkdirSync(controlledTmp, { recursive: true });
 		writeFileSync(join(originalHome, "sessions", "existing.jsonl"), "existing\n", "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 
-		const result = runWrapper(fixtureRoot, ["exec", "status", "--model", "gpt-5.5"], {
+		const result = runWrapper(fixtureRoot, ["exec", "status", "--model", "gpt-6-luna"], {
 			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 			CODEX_HOME: originalHome,
 			TMP: controlledTmp,
@@ -5960,11 +5961,11 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6004,13 +6005,13 @@ describe("codex bin wrapper", () => {
 		mkdirSync(controlledTmp, { recursive: true });
 		writeFileSync(
 			join(originalHome, "config.toml"),
-			'model_reasoning_effort = "max"\n',
+			'model_reasoning_effort = "ultra"\n',
 			"utf8",
 		);
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6065,7 +6066,7 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 
 		const commonEnv = {
 			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
@@ -6077,7 +6078,7 @@ describe("codex bin wrapper", () => {
 		};
 		const first = runWrapperAsync(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				...commonEnv,
 				CODEX_MULTI_AUTH_TEST_SESSION_ID: "first",
@@ -6086,7 +6087,7 @@ describe("codex bin wrapper", () => {
 		);
 		const second = runWrapperAsync(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				...commonEnv,
 				CODEX_MULTI_AUTH_TEST_SESSION_ID: "second",
@@ -6144,13 +6145,13 @@ describe("codex bin wrapper", () => {
 		);
 		writeFileSync(
 			join(originalHome, "config.toml"),
-			'model_reasoning_effort = "max"\n',
+			'model_reasoning_effort = "ultra"\n',
 			"utf8",
 		);
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6186,12 +6187,12 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const lockDir = join(originalHome, ".codex-multi-auth-shadow-sync.lock");
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6228,12 +6229,12 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const lockDir = join(originalHome, ".codex-multi-auth-shadow-sync.lock");
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6270,7 +6271,7 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const staleOwner = spawnSync(process.execPath, ["-e", "process.exit(0)"], {
 			encoding: "utf8",
 			windowsHide: true,
@@ -6286,7 +6287,7 @@ describe("codex bin wrapper", () => {
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6325,7 +6326,7 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const lockDir = join(originalHome, ".codex-multi-auth-shadow-sync.lock");
 		mkdirSync(lockDir, { recursive: true });
 		if (ownerContent !== undefined) {
@@ -6335,7 +6336,7 @@ describe("codex bin wrapper", () => {
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6371,7 +6372,7 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const lockDir = join(originalHome, ".codex-multi-auth-shadow-sync.lock");
 		mkdirSync(lockDir, { recursive: true });
 		writeFileSync(
@@ -6382,7 +6383,7 @@ describe("codex bin wrapper", () => {
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6413,7 +6414,7 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const lockDir = join(originalHome, ".codex-multi-auth-shadow-sync.lock");
 		mkdirSync(lockDir, { recursive: true });
 		writeFileSync(
@@ -6424,7 +6425,7 @@ describe("codex bin wrapper", () => {
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6466,14 +6467,14 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 		const lockDir = join(originalHome, ".codex-multi-auth-shadow-sync.lock");
 		mkdirSync(lockDir, { recursive: true });
 
 		const startedAt = Date.now();
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6514,11 +6515,11 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6586,11 +6587,11 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6633,11 +6634,11 @@ describe("codex bin wrapper", () => {
 		writeFileSync(join(originalHome, "auth.json"), '{"token":"original"}\n', "utf8");
 		writeFileSync(join(originalHome, "accounts.json"), '{"accounts":["original"]}\n', "utf8");
 		writeFileSync(join(originalHome, ".codex-global-state.json"), '{"last":"original"}\n', "utf8");
-		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "max"\n', "utf8");
+		writeFileSync(join(originalHome, "config.toml"), 'model_reasoning_effort = "ultra"\n', "utf8");
 
 		const result = runWrapper(
 			fixtureRoot,
-			["exec", "status", "--model", "gpt-5.5"],
+			["exec", "status", "--model", "gpt-6-luna"],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
 				CODEX_HOME: originalHome,
@@ -6716,9 +6717,9 @@ describe("codex bin wrapper", () => {
 				"exec",
 				"status",
 				"--model",
-				"gpt-5.5",
+				"gpt-6-luna",
 				"-c",
-				'model_reasoning_effort="max"',
+				'model_reasoning_effort="ultra"',
 			],
 			{
 				CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
@@ -6728,9 +6729,9 @@ describe("codex bin wrapper", () => {
 
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain(
-			'FORWARDED:exec status --model gpt-5.5 -c model_reasoning_effort="xhigh" -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-6-luna -c model_reasoning_effort="max" -c cli_auth_credentials_store="file"',
 		);
-		expect(result.stdout).not.toContain('model_reasoning_effort="max"');
+		expect(result.stdout).not.toContain('model_reasoning_effort="ultra"');
 	});
 
 	it("keeps explicit xhigh reasoning for retired mini aliases routed to gpt-5.6-terra", () => {
@@ -6842,11 +6843,11 @@ describe("codex bin wrapper", () => {
 
 		expect(proResult.status).toBe(0);
 		expect(proResult.stdout).toContain(
-			'FORWARDED:exec status --model gpt-5.5-pro -c model_reasoning_effort="medium" -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-5.5-pro -c model_reasoning_effort="low" -c cli_auth_credentials_store="file"',
 		);
 	});
 
-	it("retries GPT-5.6 Sol with gpt-5.5 after unsupported-model failures", () => {
+	it("retries GPT-5.6 Sol with gpt-6-luna after unsupported-model failures", () => {
 		const fixtureRoot = createWrapperFixture();
 		const stateDir = join(fixtureRoot, "retry-state");
 		mkdirSync(stateDir, { recursive: true });
@@ -6893,13 +6894,13 @@ describe("codex bin wrapper", () => {
 		expect(output).toContain(
 			"The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
 		);
-		expect(output).toContain("Retrying with gpt-5.5");
+		expect(output).toContain("Retrying with gpt-6-luna");
 		expect(output).toContain(
-			'FORWARDED:exec status --model gpt-5.5 -c model_reasoning_effort="low" -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-6-luna -c model_reasoning_effort="low" -c cli_auth_credentials_store="file"',
 		);
 	});
 
-	it("retries stale bare GPT-5 aliases with GPT-5.5 after unsupported-model failures", () => {
+	it("retries stale bare GPT-5 aliases with GPT-5.6 Sol after unsupported-model failures", () => {
 		const fixtureRoot = createWrapperFixture();
 		const stateDir = join(fixtureRoot, "retry-state-bare-gpt5");
 		mkdirSync(stateDir, { recursive: true });
@@ -6939,9 +6940,9 @@ describe("codex bin wrapper", () => {
 		expect(output).toContain(
 			"The 'gpt-5' model is not supported when using Codex with a ChatGPT account.",
 		);
-		expect(output).toContain("Retrying with gpt-5.5");
+		expect(output).toContain("Retrying with gpt-5.6-sol");
 		expect(output).toContain(
-			'FORWARDED:exec status --model gpt-5.5 -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-5.6-sol -c cli_auth_credentials_store="file"',
 		);
 	});
 
@@ -7034,9 +7035,9 @@ describe("codex bin wrapper", () => {
 		const output = combinedOutput(result);
 		expect(result.status).toBe(0);
 		expect(readFileSync(join(stateDir, "attempt.txt"), "utf8")).toBe("2");
-		expect(output).toContain("Retrying with gpt-5.5");
+		expect(output).toContain("Retrying with gpt-6-luna");
 		expect(output).toContain(
-			'FORWARDED:exec status --model gpt-5.5 -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-6-luna -c cli_auth_credentials_store="file"',
 		);
 	});
 
@@ -7070,7 +7071,7 @@ describe("codex bin wrapper", () => {
 		expect(output).toContain(
 			"The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
 		);
-		expect(output).not.toContain("Retrying with gpt-5.5");
+		expect(output).not.toContain("Retrying with");
 	});
 
 	it("retries GPT-5.6 Sol after access-denied style model errors", () => {
@@ -7120,9 +7121,9 @@ describe("codex bin wrapper", () => {
 		expect(output).toContain(
 			"The model `gpt-5.6-sol` does not exist or you do not have access to it.",
 		);
-		expect(output).toContain("Retrying with gpt-5.5");
+		expect(output).toContain("Retrying with gpt-6-luna");
 		expect(output).toContain(
-			'FORWARDED:exec status --model gpt-5.5 -c model_reasoning_effort="low" -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-6-luna -c model_reasoning_effort="low" -c cli_auth_credentials_store="file"',
 		);
 	});
 
@@ -7140,7 +7141,7 @@ describe("codex bin wrapper", () => {
 				"exec",
 				"status",
 				"--model",
-				"gpt-5.5",
+				"gpt-6-luna",
 				"-c",
 				'model_reasoning_effort="xhigh"',
 			],
@@ -7152,7 +7153,7 @@ describe("codex bin wrapper", () => {
 
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain(
-			'FORWARDED:exec status --model gpt-5.5 -c model_reasoning_effort="xhigh" -c cli_auth_credentials_store="file"',
+			'FORWARDED:exec status --model gpt-6-luna -c model_reasoning_effort="xhigh" -c cli_auth_credentials_store="file"',
 		);
 	});
 
@@ -7194,7 +7195,7 @@ describe("codex bin wrapper", () => {
 
 		expect(result.status).toBe(0);
 		expect(result.stdout).not.toContain(`CODEX_HOME:${originalHome}`);
-		expect(result.stdout).toContain('model_reasoning_effort = "medium"');
+		expect(result.stdout).toContain('model_reasoning_effort = "low"');
 		expect(result.stdout).not.toContain('model_reasoning_effort = "none"');
 	});
 
@@ -9065,7 +9066,7 @@ describe("forwarded signal relay", () => {
 			mkdirSync(controlledTmp, { recursive: true });
 			writeFileSync(
 				join(originalHome, "config.toml"),
-				'model_reasoning_effort = "max"\n',
+				'model_reasoning_effort = "ultra"\n',
 				"utf8",
 			);
 			const wrapper = spawn(
@@ -9075,7 +9076,7 @@ describe("forwarded signal relay", () => {
 					"exec",
 					"status",
 					"--model",
-					"gpt-5.5",
+					"gpt-6-luna",
 				],
 				{
 					env: buildWrapperEnv({
@@ -9166,7 +9167,7 @@ describe("forwarded signal relay", () => {
 			mkdirSync(controlledTmp, { recursive: true });
 			writeFileSync(
 				join(originalHome, "config.toml"),
-				'model_reasoning_effort = "max"\n',
+				'model_reasoning_effort = "ultra"\n',
 				"utf8",
 			);
 			const wrapper = spawn(
@@ -9176,7 +9177,7 @@ describe("forwarded signal relay", () => {
 					"exec",
 					"status",
 					"--model",
-					"gpt-5.5",
+					"gpt-6-luna",
 				],
 				{
 					env: buildWrapperEnv({
@@ -9247,7 +9248,7 @@ describe("forwarded signal relay", () => {
 			mkdirSync(controlledTmp, { recursive: true });
 			writeFileSync(
 				join(originalHome, "config.toml"),
-				'model_reasoning_effort = "max"\n',
+				'model_reasoning_effort = "ultra"\n',
 				"utf8",
 			);
 			const wrapper = spawn(
@@ -9257,7 +9258,7 @@ describe("forwarded signal relay", () => {
 					"exec",
 					"status",
 					"--model",
-					"gpt-5.5",
+					"gpt-6-luna",
 				],
 				{
 					env: buildWrapperEnv({
