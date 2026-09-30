@@ -668,3 +668,16 @@ it.each([false,true])("shows selected-workspace plan and cached priming in statu
  if(json) expect(JSON.parse(out).accounts[0].subscription).toMatchObject({planLabel:"Pro 500",selectedWorkspace:"Personal",primingState:"timer-running"});
  else expect(out).toContain("Personal · Pro 500 · Auto-prime OFF · Reset timer running");
 });
+
+
+it("reports auto-prime unknown when the real policy loader reads malformed JSON", async () => {
+ const {promises:fs} = await import("node:fs");
+ const {getAccountPolicyPath} = await import("../lib/account-policy.js");
+ const read = fs.readFile.bind(fs);
+ const spy = vi.spyOn(fs,"readFile").mockImplementation((...args: Parameters<typeof fs.readFile>) => String(args[0]) === getAccountPolicyPath() ? Promise.resolve("{broken") : read(...args));
+ try {
+  const deps = createStatusDeps({json:true});
+  await expect(runStatusCommand(deps)).resolves.toBe(0);
+  expect(JSON.parse(vi.mocked(deps.logInfo!).mock.calls.at(-1)![0]).accounts[0].subscription.autoPrime).toBeNull();
+ } finally {spy.mockRestore();}
+});

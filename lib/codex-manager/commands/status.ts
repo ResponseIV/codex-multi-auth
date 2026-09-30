@@ -163,7 +163,7 @@ export async function runStatusCommand(
  const resetCredits = await deps.loadResetCreditState?.().catch(()=>null);
  const resetSnapshot = (account: AccountStorageV3["accounts"][number]) => {const target=resetTargetForStoredAccount(account);return target?resetCredits?.snapshots[target.key]:undefined;};
 	let policiesUnavailable = false;
-	const accountPolicies: Awaited<ReturnType<typeof loadAccountPolicyStore>> = await (deps.loadAccountPolicies ?? loadAccountPolicyStore)().catch(() => { policiesUnavailable = true; return {version:1 as const,accounts:{}}; });
+	const accountPolicies: Awaited<ReturnType<typeof loadAccountPolicyStore>> = await (deps.loadAccountPolicies ?? loadAccountPolicyStore)({strict:true}).catch(() => { policiesUnavailable = true; return {version:1 as const,accounts:{}}; });
 	if (!deps.json && deps.loadModelInventory) for (const line of formatModelInventory(modelInventory ?? null)) logInfo(line);
 	if (!storage || (storage.accounts.length === 0 && apiRoutes.length === 0)) {
 		const restoreReason = storage ? readRestoreReason(storage) : undefined;

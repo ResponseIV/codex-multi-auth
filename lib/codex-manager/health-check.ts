@@ -99,7 +99,7 @@ export async function runHealthCheck(
 			? buildQuotaEmailFallbackState(storage.accounts)
 			: null;
 
-	const policies = await loadAccountPolicyStore().catch(() => null);
+	const policies = await loadAccountPolicyStore({strict:true}).catch(() => null);
 	const subscriptionLine = (account: Parameters<typeof subscriptionStatus>[0], snapshot: Awaited<ReturnType<typeof fetchCodexQuotaSnapshot>>) => formatSubscriptionStatus(subscriptionStatus(account, {...snapshot, updatedAt: snapshot.observedAt ?? Date.now()}, policies ? policies.accounts[getAccountPolicyKey(account)] ?? {} : undefined, Date.now()));
 	let changed = false;
 	let ok = 0;

@@ -242,6 +242,23 @@ are ignored by older versions and left in place.
 
 ---
 
+## Subscription status and Pro Max priming
+
+Unused Pro Max (Pro 500) subscriptions now qualify for opted-in first-use priming.
+`status` and `check accounts` show the observed plan, selected workspace,
+auto-prime setting, and first-use state. `status --json` adds a per-account
+`subscription` object containing `planType`, `planLabel`, `selectedWorkspace`,
+`autoPrime`, `primingState`, `primingFailure`, `automaticBlock`, `freshness`, and
+`observedAt`. Policy read failures show an unknown auto-prime setting rather than off.
+
+Checks use the saved selected workspace; disabled or invalid selections do not
+fall back to the stored binding. Status reads cached observations without network
+calls. Observations older than 30 minutes are stale, and 0% usage can still have
+a running reset timer. Use `check accounts` to refresh observations, or add
+`--prime` to allow first-use completion. Existing priming policies are preserved.
+
+No new npm scripts or manual storage migration are required.
+
 ## 2.17.0 Command Changes
 
 - `check` accepts one scope: `check accounts`, `check resets` or

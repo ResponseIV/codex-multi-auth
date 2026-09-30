@@ -59,7 +59,7 @@ Run `check` for the full check, or select one portion:
 | `check accounts` | Account authentication and live quota checks; skips reset-credit and model discovery checks |
 | `check resets` | Refresh available subscription reset credits, showing the account number and email; does not redeem credits or run inference/model probes |
 | `check capabilities` | Refresh model and capability discovery for enabled subscription workspaces and API credentials, and force the configured capability probes even inside the 15-minute cache; updates the running router catalog |
-| `check --prime`, `check accounts --prime` | Also send a tiny first-use request to genuinely unused Personal subscriptions (Plus/Pro, every window at 0%, full-length reset). This starts their 5-hour and weekly windows and uses subscription quota |
+| `check --prime`, `check accounts --prime` | Also send a tiny first-use request to genuinely unused Personal subscriptions (Plus/Pro/Pro Max (Pro 500), every window at 0%, full-length reset). This starts their 5-hour and weekly windows and uses subscription quota |
 
 Plain `check` refreshes model discovery but reuses API capability probe results
 younger than 15 minutes, including results from an earlier `check` process
@@ -356,7 +356,7 @@ A displayed 0% usage can still have a running timer. Observations older than
 state; an unrecognized plan is labeled unknown rather than guessed. Run
 `check accounts` to refresh. `check accounts --prime` additionally allows a tiny
 first-use completion. Checks honor the saved workspace selection, and do not
-fall back from a disabled selected workspace to the stored binding.
+fall back from a disabled or invalid selected workspace to the stored binding.
 
 
 `codex-multi-auth account auto-prime <index> on|off` controls automatic first-use

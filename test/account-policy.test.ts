@@ -33,6 +33,16 @@ describe("account policy store", () => {
 		await removeWithRetry(tempDir, { recursive: true, force: true });
 	});
 
+	it("distinguishes missing policies from malformed policies in strict reads", async () => {
+		const {loadAccountPolicyStore, getAccountPolicyPath} = await import("../lib/account-policy.js");
+		await expect(loadAccountPolicyStore({strict:true})).resolves.toEqual({version:1,accounts:{}});
+		for (const content of ["{broken", "null", '{"version":1,"accounts":[]}']) {
+			await fs.writeFile(getAccountPolicyPath(), content);
+			await expect(loadAccountPolicyStore({strict:true})).rejects.toThrow();
+			await expect(loadAccountPolicyStore()).resolves.toEqual({version:1,accounts:{}});
+		}
+	});
+
 	it("keeps automatic first-use priming off for fresh accounts and pre-2.17 policy files", async () => {
 		const { getAccountPolicyKey, getAccountPolicyPath, loadAccountPolicyStore, upsertAccountPolicy } = await import("../lib/account-policy.js");
 		const { runAutomaticAccountChecks } = await import("../lib/runtime/automatic-account-checks.js");
