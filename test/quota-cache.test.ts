@@ -45,6 +45,14 @@ describe("quota cache", () => {
     expect(completed.byWorkspace?.scope?.primingFailure).toBeUndefined();
   });
 
+  it("rejects malformed persisted priming evidence", async () => {
+    const { loadQuotaCache, getQuotaCachePath } = await import("../lib/quota-cache.js");
+    await fs.writeFile(getQuotaCachePath(), JSON.stringify({version:1,byAccountId:{fixture:{updatedAt:1000,status:200,model:"fixture",primary:{},secondary:{},primingFailure:["timed out"],primingCompleted:"true"}},byEmail:{}}));
+    const loaded = await loadQuotaCache();
+    expect(loaded.byAccountId.fixture?.primingFailure).toBeUndefined();
+    expect(loaded.byAccountId.fixture?.primingCompleted).toBeUndefined();
+  });
+
   it("returns empty cache by default", async () => {
     const { loadQuotaCache } = await import("../lib/quota-cache.js");
     const data = await loadQuotaCache();

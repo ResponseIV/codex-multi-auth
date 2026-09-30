@@ -95,7 +95,7 @@ function normalizeEntry(value: unknown): QuotaCacheEntry | null {
 
 	return {
 		...(value.primingCompleted === true ? {primingCompleted: true} : {}),
-		...(["timed out", "stream ended early", "upstream failed", "response too large", "network error"].includes(String(value.primingFailure)) ? {primingFailure: value.primingFailure as QuotaCacheEntry["primingFailure"]} : {}),
+		...(typeof value.primingFailure === "string" && ["timed out", "stream ended early", "upstream failed", "response too large", "network error"].includes(value.primingFailure) ? {primingFailure: value.primingFailure as QuotaCacheEntry["primingFailure"]} : {}),
 		updatedAt,
 		status,
 		model: model.trim(),
