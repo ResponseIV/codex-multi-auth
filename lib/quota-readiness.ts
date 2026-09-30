@@ -1,9 +1,10 @@
+import { extractAccountId } from "./auth/token-utils.js";
 import { createHash } from "node:crypto";
 import { resolveAccountRecordId } from "./storage/record-identity.js";
 import type { QuotaCacheData, QuotaCacheEntry, QuotaCacheWindow } from "./quota-cache.js";
 import type { AccountMetadataV3 } from "./storage.js";
 
-export type QuotaCacheAccountRef = Pick<AccountMetadataV3, "accountId" | "email" | "recordId" | "workspaces" | "currentWorkspaceIndex"> & Partial<Pick<AccountMetadataV3, "refreshToken" | "addedAt">>;
+export type QuotaCacheAccountRef = Pick<AccountMetadataV3, "accountId" | "email" | "recordId" | "workspaces" | "currentWorkspaceIndex"> & Partial<Pick<AccountMetadataV3, "refreshToken" | "addedAt" | "accessToken">>;
 
 type QuotaWindowLike = Pick<QuotaCacheWindow, "usedPercent" | "resetAtMs" | "windowMinutes">;
 
@@ -141,7 +142,7 @@ export function quotaWorkspaceKey(account: QuotaCacheAccountRef, workspaceId: st
 export function quotaWorkspaceId(account: QuotaCacheAccountRef): string | undefined {
     return account.workspaces?.length
         ? account.workspaces[account.currentWorkspaceIndex ?? 0]?.id.trim()
-        : account.accountId?.trim();
+        : account.accountId?.trim() || extractAccountId(account.accessToken);
 }
 
 /** Read exact-workspace quota, using legacy binding entries only for that binding. */

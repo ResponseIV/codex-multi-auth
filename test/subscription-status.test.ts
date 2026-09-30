@@ -44,3 +44,20 @@ it("keeps the header observation time when delayed checks save a placeholder", (
  expect(saved.updatedAt).toBe(now);
  expect(subscriptionStatus(account, saved, {}, now+60000).primingState).toBe("awaiting-first-use");
 });
+
+it.each(["business", "enterprise", "future-pro"])("does not infer first-use state from %s quota activity", planType => {
+ for (const primary of [{usedPercent: 10, windowMinutes: 300}, {usedPercent: 0, windowMinutes: 300, resetAtMs: now + 60000}]) {
+  expect(subscriptionStatus(account, entry({planType, primary}), {}, now).primingState).toBe(planType === "future-pro" ? "unknown" : "not-applicable");
+ }
+});
+
+it("finds a successful check observation for a token-only binding", async () => {
+ const {findQuotaCacheEntryForAccount} = await import("../lib/quota-readiness.js");
+ const {automaticCheckWorkspaceId} = await import("../lib/runtime/automatic-account-checks.js");
+ const tokenOnly = {refreshToken:"fixture", addedAt:1, lastUsed:1, accessToken:`e30.${Buffer.from(JSON.stringify({"https://api.openai.com/auth":{chatgpt_account_id:"token-workspace"}})).toString("base64url")}.fixture`};
+ const cache: QuotaCacheData = {byAccountId:{},byEmail:{}};
+ const workspace = automaticCheckWorkspaceId(tokenOnly)!;
+ expect(workspace).toBe("token-workspace");
+ updateQuotaCacheForWorkspace(cache, tokenOnly, workspace, {...entry(), observedAt:now}, [tokenOnly]);
+ expect(subscriptionStatus(tokenOnly, findQuotaCacheEntryForAccount(cache, tokenOnly, [tokenOnly]), {}, now)).toMatchObject({planLabel:"Pro 500", freshness:"fresh", primingState:"awaiting-first-use"});
+});

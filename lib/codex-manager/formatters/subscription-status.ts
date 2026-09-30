@@ -37,7 +37,9 @@ export function subscriptionStatus(
 	let primingState: PrimingState = "unknown";
 	if (entry && freshness === "fresh" && entry.status === 200) {
 		const windows = [entry.primary, entry.secondary].filter(w => w.windowMinutes !== 0);
-		if (entry.primingFailure) primingState = "failed";
+		if (!planType || !PLAN_LABELS.has(planType)) primingState = "unknown";
+		else if (!["plus", "pro", "prolite", "promax"].includes(planType)) primingState = "not-applicable";
+		else if (entry.primingFailure) primingState = "failed";
 		else if (entry.primingCompleted) primingState = "completed";
 		else if (windows.some(w => typeof w.usedPercent === "number" && w.usedPercent > 0)) {
 			primingState = "used";
@@ -49,8 +51,6 @@ export function subscriptionStatus(
 			primingState = "timer-running";
 		} else if (needsSubscriptionFirstUse(entry, entry.updatedAt)) {
 			primingState = "awaiting-first-use";
-		} else if (planType && PLAN_LABELS.has(planType) && !["plus", "pro", "prolite", "promax"].includes(planType)) {
-			primingState = "not-applicable";
 		}
 	}
 	const automaticBlock = account.enabled === false ? "account disabled"
