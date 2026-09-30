@@ -33,3 +33,11 @@ it("does not prime when any active window has an established countdown",()=>{
 it("accepts a successful response.done terminal event",async()=>{
  await expect(finishSubscriptionFirstUse(new Response('data: {"type":"response.done","response":{"status":"completed"}}\n\n'),1000)).resolves.toBeUndefined();
 });
+
+it("recognizes unused Pro Max subscriptions while preserving first-use guards", () => {
+ const snapshot = {...unused(), planType: "promax"};
+ expect(needsSubscriptionFirstUse(snapshot, now)).toBe(true);
+ expect(needsSubscriptionFirstUse({...snapshot, primary: {...snapshot.primary, usedPercent: 0.01}}, now)).toBe(false);
+ expect(needsSubscriptionFirstUse({...snapshot, primary: {...snapshot.primary, resetAtMs: now + 600000000}}, now)).toBe(false);
+ expect(needsSubscriptionFirstUse({...snapshot, status: 429}, now)).toBe(false);
+});
