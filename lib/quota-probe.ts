@@ -50,6 +50,8 @@ export interface CodexQuotaWindow {
 }
 
 export interface CodexQuotaSnapshot {
+	/** Time quota headers were observed, before consuming the response stream. */
+	observedAt?: number;
 	primingCompleted?: boolean;
 	primingFailure?: FirstUseProbeError["reason"];
 	status: number;
@@ -439,13 +441,14 @@ export async function fetchCodexQuotaSnapshot(
 
 			const snapshotBase = parseQuotaSnapshotBase(response.headers, response.status);
 			if (snapshotBase) {
-				if (options.primeUnusedSubscription && needsSubscriptionFirstUse(snapshotBase, Date.now())) {
+				const observedAt = Date.now();
+				if (options.primeUnusedSubscription && needsSubscriptionFirstUse(snapshotBase, observedAt)) {
 					try {
 						await finishSubscriptionFirstUse(response, timeoutMs);
-						return { ...snapshotBase, model, primingCompleted: true };
+						return { ...snapshotBase, observedAt, model, primingCompleted: true };
 					} catch (error) {
 						// Keep valid quota data without retrying an accepted inference.
-						if (error instanceof FirstUseProbeError) return { ...snapshotBase, model, primingFailure: error.reason };
+						if (error instanceof FirstUseProbeError) return { ...snapshotBase, observedAt, model, primingFailure: error.reason };
 						throw error;
 					}
 				}
@@ -454,7 +457,7 @@ export async function fetchCodexQuotaSnapshot(
 				} catch {
 					// Best effort cancellation.
 				}
-				return { ...snapshotBase, model };
+				return { ...snapshotBase, observedAt, model };
 			}
 
 			if (!response.ok) {

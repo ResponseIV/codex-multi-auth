@@ -343,6 +343,22 @@ Notes:
 
 ### Automatic subscription priming
 
+`status` and `check accounts` show the selected workspace, observed plan (for
+example **Pro 500**), automatic-priming setting, and first-use state. `status --json`
+adds a `subscription` object per account with `planType`, `planLabel`,
+`selectedWorkspace`, `autoPrime`, `primingState`, `primingFailure`, `automaticBlock`,
+`freshness`, and `observedAt`. Status remains local and does not run network probes.
+
+States distinguish awaiting first use, a running reset timer, recorded usage,
+completed first use (timer not yet verified), failure, and unknown/not applicable.
+A displayed 0% usage can still have a running timer. Observations older than
+30 minutes, or dated in the future, are marked stale and show an unknown priming
+state; an unrecognized plan is labeled unknown rather than guessed. Run
+`check accounts` to refresh. `check accounts --prime` additionally allows a tiny
+first-use completion. Checks honor the saved workspace selection, and do not
+fall back from a disabled selected workspace to the stored binding.
+
+
 `codex-multi-auth account auto-prime <index> on|off` controls automatic first-use
 completion for that account (default: off). `account policy list` and `status`
 show the setting; their JSON outputs include `autoPrime`.

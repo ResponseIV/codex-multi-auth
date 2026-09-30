@@ -1,3 +1,4 @@
+import { quotaWorkspaceKey } from "../lib/quota-readiness.js";
 import { resetTargetForStoredAccount } from "../lib/runtime/account-reset-credits.js";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -655,4 +656,15 @@ it("uses scoped Personal quota in status JSON and text instead of stale organiza
  expect(result.accounts[0].forecastRiskScore).toBe(0);
  logInfo.mockClear();await runStatusCommand({...deps,json:false});
  expect(logInfo.mock.calls.flat().join("\n")).not.toContain("quota-exhausted");
+});
+
+it.each([false,true])("shows selected-workspace plan and cached priming in status (json=%s)", async json => {
+ const storage=createStorage(); const a=storage.accounts[0]!;
+ a.accountId="org";a.workspaces=[{id:"personal",name:"Personal (role:owner)"}];
+ const key=quotaWorkspaceKey(a,"personal")!;
+ const deps=createStatusDeps({json,loadAccounts:async()=>storage,loadAccountPolicies:async()=>({version:1,accounts:{}}),loadQuotaCache:async()=>({byEmail:{},byAccountId:{org:{updatedAt:2000,status:200,model:"fixture",planType:"business",primary:{},secondary:{}}},byWorkspace:{[key]:{updatedAt:2000,status:200,model:"fixture",planType:"promax",primary:{usedPercent:0,windowMinutes:300,resetAtMs:602000},secondary:{windowMinutes:0}}}})});
+ await runStatusCommand(deps);
+ const out=vi.mocked(deps.logInfo!).mock.calls.map(c=>c[0]).join("\n");
+ if(json) expect(JSON.parse(out).accounts[0].subscription).toMatchObject({planLabel:"Pro 500",selectedWorkspace:"Personal",primingState:"timer-running"});
+ else expect(out).toContain("Personal · Pro 500 · Auto-prime OFF · Reset timer running");
 });

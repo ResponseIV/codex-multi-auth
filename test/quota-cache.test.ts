@@ -32,6 +32,19 @@ describe("quota cache", () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
+  it("round-trips bounded priming evidence and replaces it after a new observation", async () => {
+    const { loadQuotaCache, saveQuotaCache } = await import("../lib/quota-cache.js");
+    const entry = {updatedAt: 1000, status: 200, model: "fixture", planType: "promax", primary: {usedPercent: 0}, secondary: {windowMinutes: 0}, primingFailure: "timed out" as const};
+    await saveQuotaCache({byAccountId: {}, byEmail: {}, byWorkspace: {scope: entry}});
+    const failed = await loadQuotaCache();
+    expect(failed.byWorkspace?.scope?.primingFailure).toBe("timed out");
+    const {primingFailure: _failure, ...clean} = entry;
+    await saveQuotaCache({byAccountId: {}, byEmail: {}, byWorkspace: {scope: {...clean, updatedAt: 2000, primingCompleted: true}}}, failed);
+    const completed = await loadQuotaCache();
+    expect(completed.byWorkspace?.scope).toMatchObject({primingCompleted: true});
+    expect(completed.byWorkspace?.scope?.primingFailure).toBeUndefined();
+  });
+
   it("returns empty cache by default", async () => {
     const { loadQuotaCache } = await import("../lib/quota-cache.js");
     const data = await loadQuotaCache();

@@ -75,7 +75,9 @@ export function getPersistedQuotaViewForAccount(
 /** Retain only quota fields from a probe, never its credentials or response body. */
 function quotaEntryFromSnapshot(snapshot: CodexQuotaSnapshot): QuotaCacheEntry {
 	return {
-		updatedAt: Date.now(),
+		...(snapshot.primingCompleted ? {primingCompleted: true} : {}),
+		...(snapshot.primingFailure ? {primingFailure: snapshot.primingFailure} : {}),
+		updatedAt: snapshot.observedAt ?? Date.now(),
 		status: snapshot.status,
 		model: snapshot.model,
 		planType: snapshot.planType,

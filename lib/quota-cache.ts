@@ -14,6 +14,8 @@ export interface QuotaCacheWindow {
 }
 
 export interface QuotaCacheEntry {
+	primingCompleted?: boolean;
+	primingFailure?: "timed out" | "stream ended early" | "upstream failed" | "response too large" | "network error";
 	updatedAt: number;
 	status: number;
 	model: string;
@@ -92,6 +94,8 @@ function normalizeEntry(value: unknown): QuotaCacheEntry | null {
 	}
 
 	return {
+		...(value.primingCompleted === true ? {primingCompleted: true} : {}),
+		...(["timed out", "stream ended early", "upstream failed", "response too large", "network error"].includes(String(value.primingFailure)) ? {primingFailure: value.primingFailure as QuotaCacheEntry["primingFailure"]} : {}),
 		updatedAt,
 		status,
 		model: model.trim(),
