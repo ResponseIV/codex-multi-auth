@@ -3146,7 +3146,12 @@ describe("codex manager cli commands", () => {
 			expect(refreshQueueMocks.queuedRefresh).toHaveBeenCalledTimes(1);
 			expect(quotaProbeMocks.fetchCodexQuotaSnapshot).toHaveBeenCalledTimes(2);
 			expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledTimes(1);
+        const scoped = Object.values(quotaCacheMocks.saveQuotaCache.mock.calls[0]![0].byWorkspace ?? {});
+        expect(scoped).toHaveLength(2);
+        expect(scoped).toEqual(expect.arrayContaining([expect.objectContaining({primary:expect.objectContaining({usedPercent:20})}),expect.objectContaining({primary:expect.objectContaining({usedPercent:70})})]));
+
 			expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledWith({
+                byWorkspace: expect.any(Object),
 				byAccountId: {},
 				byEmail: {},
 			}, expect.objectContaining({byAccountId: expect.any(Object), byEmail: expect.any(Object)}));
@@ -3273,7 +3278,12 @@ describe("codex manager cli commands", () => {
 
 			expect(exitCode).toBe(0);
 			expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledTimes(1);
+        const scoped = Object.values(quotaCacheMocks.saveQuotaCache.mock.calls[0]![0].byWorkspace ?? {});
+        expect(scoped).toHaveLength(2);
+        expect(scoped).toEqual(expect.arrayContaining([expect.objectContaining({primary:expect.objectContaining({usedPercent:25})}),expect.objectContaining({primary:expect.objectContaining({usedPercent:70})})]));
+
 			expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledWith({
+                byWorkspace: expect.any(Object),
 				byAccountId: {},
 				byEmail: {
 					"beta@example.com": {
@@ -3565,7 +3575,11 @@ describe("codex manager cli commands", () => {
 			byEmail: {},
 		});
 		expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledTimes(1);
+        const scoped = Object.values(quotaCacheMocks.saveQuotaCache.mock.calls[0]![0].byWorkspace ?? {});
+        expect(scoped).toHaveLength(1);
+
 		expect(quotaCacheMocks.saveQuotaCache).toHaveBeenCalledWith({
+                byWorkspace: expect.any(Object),
 			byAccountId: {
 				acc_live: {
 					updatedAt: expect.any(Number),
