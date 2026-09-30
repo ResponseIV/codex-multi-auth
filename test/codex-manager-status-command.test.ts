@@ -670,11 +670,11 @@ it.each([false,true])("shows selected-workspace plan and cached priming in statu
 });
 
 
-it("reports auto-prime unknown when the real policy loader reads malformed JSON", async () => {
+it.each(["{broken", JSON.stringify({version:1,accounts:{"sha256:fixture":{autoPrime:"true"}}}), JSON.stringify({version:1,accounts:{"sha256:fixture":null}})])("reports auto-prime unknown when the real policy loader reads invalid policies: %s", async content => {
  const {promises:fs} = await import("node:fs");
  const {getAccountPolicyPath} = await import("../lib/account-policy.js");
  const read = fs.readFile.bind(fs);
- const spy = vi.spyOn(fs,"readFile").mockImplementation((...args: Parameters<typeof fs.readFile>) => String(args[0]) === getAccountPolicyPath() ? Promise.resolve("{broken") : read(...args));
+ const spy = vi.spyOn(fs,"readFile").mockImplementation((...args: Parameters<typeof fs.readFile>) => String(args[0]) === getAccountPolicyPath() ? Promise.resolve(content) : read(...args));
  try {
   const deps = createStatusDeps({json:true});
   await expect(runStatusCommand(deps)).resolves.toBe(0);

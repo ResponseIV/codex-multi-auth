@@ -43,6 +43,19 @@ describe("account policy store", () => {
 		}
 	});
 
+	it.each([null, [], "invalid", {autoPrime:"true"}, {autoPrime:0}, {autoPrime:null}])("rejects malformed account policy rows in strict mode: %j", async row => {
+		const {loadAccountPolicyStore, getAccountPolicyPath} = await import("../lib/account-policy.js");
+		await fs.writeFile(getAccountPolicyPath(), JSON.stringify({version:1,accounts:{"sha256:fixture":row}}));
+		await expect(loadAccountPolicyStore({strict:true})).rejects.toThrow("Invalid account policy");
+		await expect(loadAccountPolicyStore()).resolves.toMatchObject({accounts:{"sha256:fixture":{autoPrime:false}}});
+	});
+
+	it.each([{}, {autoPrime:false}, {autoPrime:true}])("accepts legacy and boolean priming policies in strict mode: %j", async row => {
+		const {loadAccountPolicyStore, getAccountPolicyPath} = await import("../lib/account-policy.js");
+		await fs.writeFile(getAccountPolicyPath(), JSON.stringify({version:1,accounts:{"sha256:fixture":row}}));
+		await expect(loadAccountPolicyStore({strict:true})).resolves.toMatchObject({accounts:{"sha256:fixture":{autoPrime:"autoPrime" in row && row.autoPrime === true}}});
+	});
+
 	it("keeps automatic first-use priming off for fresh accounts and pre-2.17 policy files", async () => {
 		const { getAccountPolicyKey, getAccountPolicyPath, loadAccountPolicyStore, upsertAccountPolicy } = await import("../lib/account-policy.js");
 		const { runAutomaticAccountChecks } = await import("../lib/runtime/automatic-account-checks.js");

@@ -142,8 +142,17 @@ export async function loadAccountPolicyStore(options: { strict?: boolean } = {})
 	const path = getAccountPolicyPath();
 	try {
 		const parsed: unknown = JSON.parse(await readFileWithRetry(path));
-		if (options.strict && (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.accounts))) {
-			throw new Error("Invalid account policy store");
+		if (options.strict) {
+			if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.accounts)) {
+				throw new Error("Invalid account policy store");
+			}
+			for (const [key, row] of Object.entries(parsed.accounts)) {
+				if (!key.startsWith("sha256:")) continue;
+				// Legacy rows may omit autoPrime; an explicit malformed value is not OFF.
+				if (!isRecord(row) || ("autoPrime" in row && typeof row.autoPrime !== "boolean")) {
+					throw new Error("Invalid account policy row");
+				}
+			}
 		}
 		return normalizeStore(parsed);
 	} catch (error) {
