@@ -77,6 +77,21 @@ function allOutput(logInfo: ReturnType<typeof vi.fn>): string {
 	return logInfo.mock.calls.map((call) => String(call[0])).join("\n");
 }
 
+const FORKED_ID = "019e9836-5002-7821-a9c2-3ffd26a1199c";
+const PARENT_ID = "019e9836-5001-7821-a9c2-3ffd26a1199b";
+
+// Forked rollouts write their own session_meta first and then append the parent's.
+function forkedRolloutFile(): FakeFile {
+	return {
+		id: FORKED_ID,
+		content: [
+			metaLine({ id: FORKED_ID, model_provider: "codex-multi-auth-runtime-proxy" }),
+			metaLine({ id: PARENT_ID, model_provider: "openai" }),
+			userMessageLine("forked message"),
+		].join("\n"),
+	};
+}
+
 describe("runHistoryCommand list", () => {
 	it("lists sessions from every provider, not just the active one", () => {
 		const deps = createDeps([
@@ -159,6 +174,18 @@ describe("runHistoryCommand list", () => {
 		expect(payload.count).toBe(2);
 		expect(payload.sessions[0].id).toBe("11111111-1111-7821-a9c2-11111111bbbb");
 		expect(payload.sessions[1].id).toBe("00000000-0000-7821-a9c2-00000000aaaa");
+	});
+
+	it("lists forked rollouts under their own session_meta id", () => {
+		const deps = createDeps([forkedRolloutFile()]);
+
+		const code = runHistoryCommand(["list", "--json"], deps);
+
+		expect(code).toBe(0);
+		const payload = JSON.parse(allOutput(deps.logInfo));
+		expect(payload.count).toBe(1);
+		expect(payload.sessions[0].id).toBe(FORKED_ID);
+		expect(payload.sessions[0].provider).toBe("codex-multi-auth-runtime-proxy");
 	});
 
 	it("emits machine-readable JSON with provider field", () => {
@@ -325,6 +352,18 @@ describe("runHistoryCommand show", () => {
 		expect(output).toContain("message one");
 		expect(output).toContain("message three");
 		expect(output).not.toContain("message four should be trimmed");
+	});
+
+	it("shows forked rollouts by their own session_meta id", () => {
+		const deps = createDeps([forkedRolloutFile()]);
+
+		const code = runHistoryCommand(["show", FORKED_ID], deps);
+
+		expect(code).toBe(0);
+		const output = allOutput(deps.logInfo);
+		expect(output).toContain(FORKED_ID);
+		expect(output).toContain("provider:   codex-multi-auth-runtime-proxy");
+		expect(output).toContain("forked message");
 	});
 
 	it("returns an error when the session id is unknown", () => {
