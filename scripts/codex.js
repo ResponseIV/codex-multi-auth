@@ -3565,6 +3565,7 @@ function createShadowHomeMirror(
 	const originalFileStates = new Map();
 	const copiedDirectoryNames = new Set();
 	const materializedFileNames = [];
+	const linkedSqliteFileNames = new Set();
 	const rememberSyncFile = (name) => {
 		if (!originalFileStates.has(name)) {
 			originalFileStates.set(
@@ -3657,12 +3658,17 @@ function createShadowHomeMirror(
 		}
 		for (const name of materializedFileNames) {
 			if (
-				!isLinkedSqliteShadowHomeFile(
+				isLinkedSqliteShadowHomeFile(
 					name,
 					join(shadowCodexHome, name),
 					join(originalCodexHome, name),
 				)
 			) {
+				// Remember the link identity now: if the original is replaced later,
+				// the shadow hard link no longer matches it, but there is still nothing
+				// to sync back and re-checking at cleanup would read both files in full.
+				linkedSqliteFileNames.add(name);
+			} else {
 				rememberSyncFile(name);
 			}
 		}
@@ -3672,6 +3678,9 @@ function createShadowHomeMirror(
 		let releaseLock = () => {};
 		try {
 			const names = collectShadowHomeSyncFileNames(shadowCodexHome, syncFileNames);
+			for (const name of linkedSqliteFileNames) {
+				names.delete(name);
+			}
 			releaseLock = acquireShadowHomeSyncLock(originalCodexHome);
 			syncShadowHomeAuthBundle(
 				originalCodexHome,

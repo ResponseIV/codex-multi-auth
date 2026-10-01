@@ -2407,6 +2407,64 @@ describe("codex bin wrapper", () => {
 		);
 	});
 
+	it("does not read a linked sqlite file whose original was replaced during the launch", () => {
+		const fixtureRoot = createWrapperFixture();
+		createRuntimeRotationProxyFixtureModule(fixtureRoot);
+		const readLogPath = join(fixtureRoot, "sqlite-reads.log");
+		const readSpyPath = join(fixtureRoot, "sqlite-read-spy.mjs");
+		writeFileSync(
+			readSpyPath,
+			[
+				'import fs from "node:fs";',
+				'import { syncBuiltinESMExports } from "node:module";',
+				"const logPath = process.env.CODEX_MULTI_AUTH_TEST_SQLITE_READ_LOG ?? '';",
+				"const originalReadFileSync = fs.readFileSync;",
+				"fs.readFileSync = function (path, ...rest) {",
+				"  if (logPath && /\\.sqlite(?:-wal|-shm)?$/i.test(String(path))) {",
+				"    fs.appendFileSync(logPath, `${String(path)}\\n`, 'utf8');",
+				"  }",
+				"  return originalReadFileSync.call(this, path, ...rest);",
+				"};",
+				"syncBuiltinESMExports();",
+			].join("\n"),
+			"utf8",
+		);
+		// Simulate the hard-link fallback: the shadow entry becomes a hard link to the
+		// launch-time inode, then another process atomically replaces the original.
+		const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+			"#!/usr/bin/env node",
+			'const fs = require("node:fs");',
+			'const path = require("node:path");',
+			'const shadowPath = path.join(process.env.CODEX_HOME ?? "", "thread_history_1.sqlite");',
+			'const originalPath = process.env.CODEX_MULTI_AUTH_TEST_ORIGINAL_HISTORY;',
+			"fs.unlinkSync(shadowPath);",
+			"fs.linkSync(originalPath, shadowPath);",
+			'fs.writeFileSync(`${originalPath}.next`, "replaced history\\n", "utf8");',
+			"fs.renameSync(`${originalPath}.next`, originalPath);",
+			"process.exit(0);",
+		]);
+		const originalHome = join(fixtureRoot, "codex-home");
+		const originalHistoryPath = join(originalHome, "thread_history_1.sqlite");
+		mkdirSync(originalHome, { recursive: true });
+		writeFileSync(originalHistoryPath, "history\n", "utf8");
+
+		const result = runWrapper(fixtureRoot, ["exec", "status"], {
+			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+			CODEX_HOME: originalHome,
+			CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
+			CODEX_MULTI_AUTH_TEST_PROXY_BASE_URL: "http://127.0.0.1:4567",
+			CODEX_MULTI_AUTH_TEST_PROXY_MARKER: join(fixtureRoot, "proxy-marker.txt"),
+			CODEX_MULTI_AUTH_TEST_ORIGINAL_HISTORY: originalHistoryPath,
+			CODEX_MULTI_AUTH_TEST_SQLITE_READ_LOG: readLogPath,
+			NODE_OPTIONS: `--import ${pathToFileURL(readSpyPath).href}`,
+			OPENAI_API_KEY: undefined,
+		});
+
+		expect(result.status).toBe(0);
+		expect(existsSync(readLogPath) ? readFileSync(readLogPath, "utf8") : "").toBe("");
+		expect(readFileSync(originalHistoryPath, "utf8")).toBe("replaced history\n");
+	});
+
 	it("inserts the runtime model provider before TOML array tables", () => {
 		const fixtureRoot = createWrapperFixture();
 		createRuntimeRotationProxyFixtureModule(fixtureRoot);
