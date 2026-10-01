@@ -2465,6 +2465,69 @@ describe("codex bin wrapper", () => {
 		expect(readFileSync(originalHistoryPath, "utf8")).toBe("replaced history\n");
 	});
 
+	it("does not read linked sqlite sidecars whose originals were replaced during the launch", () => {
+		const fixtureRoot = createWrapperFixture();
+		createRuntimeRotationProxyFixtureModule(fixtureRoot);
+		const readLogPath = join(fixtureRoot, "sqlite-reads.log");
+		const readSpyPath = join(fixtureRoot, "sqlite-read-spy.mjs");
+		writeFileSync(
+			readSpyPath,
+			[
+				'import fs from "node:fs";',
+				'import { syncBuiltinESMExports } from "node:module";',
+				"const logPath = process.env.CODEX_MULTI_AUTH_TEST_SQLITE_READ_LOG ?? '';",
+				"const originalReadFileSync = fs.readFileSync;",
+				"fs.readFileSync = function (path, ...rest) {",
+				"  if (logPath && /\\.sqlite(?:-wal|-shm)?$/i.test(String(path))) {",
+				"    fs.appendFileSync(logPath, `${String(path)}\\n`, 'utf8');",
+				"  }",
+				"  return originalReadFileSync.call(this, path, ...rest);",
+				"};",
+				"syncBuiltinESMExports();",
+			].join("\n"),
+			"utf8",
+		);
+		// Sidecars are linked while the main file materializes, so their own readdir
+		// entries are skipped. Hard-link them and replace the originals mid-launch.
+		const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+			"#!/usr/bin/env node",
+			'const fs = require("node:fs");',
+			'const path = require("node:path");',
+			'const shadowPath = path.join(process.env.CODEX_HOME ?? "", "thread_history_1.sqlite");',
+			'const originalPath = process.env.CODEX_MULTI_AUTH_TEST_ORIGINAL_HISTORY;',
+			'for (const suffix of ["-wal", "-shm"]) {',
+			"  fs.unlinkSync(`${shadowPath}${suffix}`);",
+			"  fs.linkSync(`${originalPath}${suffix}`, `${shadowPath}${suffix}`);",
+			"  fs.writeFileSync(`${originalPath}${suffix}.next`, `replaced${suffix}\\n`, \"utf8\");",
+			"  fs.renameSync(`${originalPath}${suffix}.next`, `${originalPath}${suffix}`);",
+			"}",
+			"process.exit(0);",
+		]);
+		const originalHome = join(fixtureRoot, "codex-home");
+		const originalHistoryPath = join(originalHome, "thread_history_1.sqlite");
+		mkdirSync(originalHome, { recursive: true });
+		writeFileSync(originalHistoryPath, "history\n", "utf8");
+		writeFileSync(`${originalHistoryPath}-wal`, "history wal\n", "utf8");
+		writeFileSync(`${originalHistoryPath}-shm`, "history shm\n", "utf8");
+
+		const result = runWrapper(fixtureRoot, ["exec", "status"], {
+			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+			CODEX_HOME: originalHome,
+			CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
+			CODEX_MULTI_AUTH_TEST_PROXY_BASE_URL: "http://127.0.0.1:4567",
+			CODEX_MULTI_AUTH_TEST_PROXY_MARKER: join(fixtureRoot, "proxy-marker.txt"),
+			CODEX_MULTI_AUTH_TEST_ORIGINAL_HISTORY: originalHistoryPath,
+			CODEX_MULTI_AUTH_TEST_SQLITE_READ_LOG: readLogPath,
+			NODE_OPTIONS: `--import ${pathToFileURL(readSpyPath).href}`,
+			OPENAI_API_KEY: undefined,
+		});
+
+		expect(result.status).toBe(0);
+		expect(existsSync(readLogPath) ? readFileSync(readLogPath, "utf8") : "").toBe("");
+		expect(readFileSync(`${originalHistoryPath}-wal`, "utf8")).toBe("replaced-wal\n");
+		expect(readFileSync(`${originalHistoryPath}-shm`, "utf8")).toBe("replaced-shm\n");
+	});
+
 	it("inserts the runtime model provider before TOML array tables", () => {
 		const fixtureRoot = createWrapperFixture();
 		createRuntimeRotationProxyFixtureModule(fixtureRoot);

@@ -3668,6 +3668,20 @@ function createShadowHomeMirror(
 				// the shadow hard link no longer matches it, but there is still nothing
 				// to sync back and re-checking at cleanup would read both files in full.
 				linkedSqliteFileNames.add(name);
+				if (isSqliteMainFile(name)) {
+					// Sidecars linked alongside the main file skip their own readdir entry.
+					for (const sidecarName of [`${name}-wal`, `${name}-shm`]) {
+						if (
+							isLinkedSqliteShadowHomeFile(
+								sidecarName,
+								join(shadowCodexHome, sidecarName),
+								join(originalCodexHome, sidecarName),
+							)
+						) {
+							linkedSqliteFileNames.add(sidecarName);
+						}
+					}
+				}
 			} else {
 				rememberSyncFile(name);
 			}
