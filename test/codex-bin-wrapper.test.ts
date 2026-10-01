@@ -2295,6 +2295,66 @@ describe("codex bin wrapper", () => {
 		expect(output).toContain("simulated SQLite sidecar placeholder failure");
 	});
 
+	it("does not read linked sqlite files when snapshotting or syncing the shadow home", () => {
+		const fixtureRoot = createWrapperFixture();
+		createRuntimeRotationProxyFixtureModule(fixtureRoot);
+		const readLogPath = join(fixtureRoot, "sqlite-reads.log");
+		const readSpyPath = join(fixtureRoot, "sqlite-read-spy.mjs");
+		writeFileSync(
+			readSpyPath,
+			[
+				'import fs from "node:fs";',
+				'import { syncBuiltinESMExports } from "node:module";',
+				"const logPath = process.env.CODEX_MULTI_AUTH_TEST_SQLITE_READ_LOG ?? '';",
+				"const originalReadFileSync = fs.readFileSync;",
+				"fs.readFileSync = function (path, ...rest) {",
+				"  if (logPath && /\\.sqlite(?:-wal|-shm)?$/i.test(String(path))) {",
+				"    fs.appendFileSync(logPath, `${String(path)}\\n`, 'utf8');",
+				"  }",
+				"  return originalReadFileSync.call(this, path, ...rest);",
+				"};",
+				"syncBuiltinESMExports();",
+			].join("\n"),
+			"utf8",
+		);
+		const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+			"#!/usr/bin/env node",
+			'const fs = require("node:fs");',
+			'const path = require("node:path");',
+			'const historyPath = path.join(process.env.CODEX_HOME ?? "", "thread_history_1.sqlite");',
+			'console.log(`HISTORY_MIRRORED:${fs.existsSync(historyPath)}`);',
+			'fs.appendFileSync(historyPath, "shadow-history\\n", "utf8");',
+			'fs.appendFileSync(`${historyPath}-wal`, "shadow-history-wal\\n", "utf8");',
+			"process.exit(0);",
+		]);
+		const originalHome = join(fixtureRoot, "codex-home");
+		mkdirSync(originalHome, { recursive: true });
+		writeFileSync(join(originalHome, "thread_history_1.sqlite"), "history\n", "utf8");
+		writeFileSync(join(originalHome, "thread_history_1.sqlite-wal"), "history wal\n", "utf8");
+		writeFileSync(join(originalHome, "thread_history_1.sqlite-shm"), "history shm\n", "utf8");
+
+		const result = runWrapper(fixtureRoot, ["exec", "status"], {
+			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+			CODEX_HOME: originalHome,
+			CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "1",
+			CODEX_MULTI_AUTH_TEST_PROXY_BASE_URL: "http://127.0.0.1:4567",
+			CODEX_MULTI_AUTH_TEST_PROXY_MARKER: join(fixtureRoot, "proxy-marker.txt"),
+			CODEX_MULTI_AUTH_TEST_SQLITE_READ_LOG: readLogPath,
+			NODE_OPTIONS: `--import ${pathToFileURL(readSpyPath).href}`,
+			OPENAI_API_KEY: undefined,
+		});
+
+		expect(result.status).toBe(0);
+		expect(combinedOutput(result)).toContain("HISTORY_MIRRORED:true");
+		expect(existsSync(readLogPath) ? readFileSync(readLogPath, "utf8") : "").toBe("");
+		expect(readFileSync(join(originalHome, "thread_history_1.sqlite"), "utf8")).toBe(
+			"history\nshadow-history\n",
+		);
+		expect(readFileSync(join(originalHome, "thread_history_1.sqlite-wal"), "utf8")).toBe(
+			"history wal\nshadow-history-wal\n",
+		);
+	});
+
 	it("inserts the runtime model provider before TOML array tables", () => {
 		const fixtureRoot = createWrapperFixture();
 		createRuntimeRotationProxyFixtureModule(fixtureRoot);

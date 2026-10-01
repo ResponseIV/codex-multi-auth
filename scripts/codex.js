@@ -3161,6 +3161,24 @@ function isFileLike(path) {
 	}
 }
 
+function isSameFile(leftPath, rightPath) {
+	try {
+		const left = statSync(leftPath, { bigint: true });
+		const right = statSync(rightPath, { bigint: true });
+		return left.dev === right.dev && left.ino === right.ino;
+	} catch {
+		return false;
+	}
+}
+
+// A SQLite file materialized by link is the original file itself, so its shadow
+// and original snapshots can never differ and sync-back is always a no-op.
+// Snapshotting it would only read the whole database (often several GB) into
+// memory on every launch and again on cleanup.
+function isLinkedSqliteShadowHomeFile(name, shadowPath, originalPath) {
+	return shouldMaterializeFileIntoShadowHome(name) && isSameFile(shadowPath, originalPath);
+}
+
 function mirrorDirectoryIntoShadowHome(sourcePath, destinationPath) {
 	try {
 		if ((process.env.CODEX_MULTI_AUTH_TEST_FORCE_SHADOW_DIR_COPY ?? "").trim() === "1") {
@@ -3505,12 +3523,15 @@ function syncAdditionalShadowHomeFiles(
 			continue;
 		}
 		const shadowPath = join(shadowCodexHome, name);
+		const originalPath = join(originalCodexHome, name);
+		if (isLinkedSqliteShadowHomeFile(name, shadowPath, originalPath)) {
+			continue;
+		}
 		const shadowState = captureShadowHomeState(shadowPath);
 		if (!shadowState.exists || shadowState.unreadable) {
 			continue;
 		}
 
-		const originalPath = join(originalCodexHome, name);
 		const originalSnapshot =
 			originalFileStates.get(name) ?? { exists: false, content: null };
 		const currentOriginalState = captureShadowHomeState(originalPath);
@@ -3543,6 +3564,7 @@ function createShadowHomeMirror(
 		options.linkOnlyDirectoryPredicate ?? (() => false);
 	const originalFileStates = new Map();
 	const copiedDirectoryNames = new Set();
+	const materializedFileNames = [];
 	const rememberSyncFile = (name) => {
 		if (!originalFileStates.has(name)) {
 			originalFileStates.set(
@@ -3603,7 +3625,12 @@ function createShadowHomeMirror(
 					continue;
 				}
 				if (fileLike) {
-					rememberSyncFile(name);
+					if (shouldMaterializeFile && !isKnownStateFile) {
+						// Snapshot after the loop, once links exist, so linked SQLite is never read.
+						materializedFileNames.push(name);
+					} else {
+						rememberSyncFile(name);
+					}
 					if (isKnownStateFile) {
 						copyFileSync(sourcePath, destinationPath);
 						tightenFile(destinationPath);
@@ -3626,6 +3653,17 @@ function createShadowHomeMirror(
 				}
 				// A missing or locked optional home entry should not block runtime
 				// launch; auth/config files still get handled explicitly.
+			}
+		}
+		for (const name of materializedFileNames) {
+			if (
+				!isLinkedSqliteShadowHomeFile(
+					name,
+					join(shadowCodexHome, name),
+					join(originalCodexHome, name),
+				)
+			) {
+				rememberSyncFile(name);
 			}
 		}
 	}
