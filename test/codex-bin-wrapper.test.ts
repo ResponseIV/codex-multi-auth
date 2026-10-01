@@ -1577,6 +1577,58 @@ describe("codex bin wrapper", () => {
 		expect(index).not.toContain("SHOULD_NOT_BE_REPAIRED");
 	});
 
+	it("indexes forked rollouts under their own session_meta id", () => {
+		const fixtureRoot = createWrapperFixture();
+		const codexHome = join(fixtureRoot, "codex-home");
+		const parentSessionId = "019ddf58-f831-7e12-bf4a-fae1ed000021";
+		const forkedSessionId = "019ddf58-f831-7e12-bf4a-fae1ed000022";
+		mkdirSync(codexHome, { recursive: true });
+		writeFileSync(
+			join(codexHome, "session_index.jsonl"),
+			`${JSON.stringify({
+				id: parentSessionId,
+				thread_name: "Parent session",
+				updated_at: "2026-04-30T17:20:00.000Z",
+			})}\n`,
+			"utf8",
+		);
+		const fakeBin = createCustomFakeCodexBin(fixtureRoot, [
+			"const { mkdirSync, writeFileSync } = require('node:fs');",
+			"const { join } = require('node:path');",
+			`const parentSessionId = ${JSON.stringify(parentSessionId)};`,
+			`const forkedSessionId = ${JSON.stringify(forkedSessionId)};`,
+			"const codexHome = process.env.CODEX_HOME;",
+			"const sessionDir = join(codexHome, 'sessions', '2026', '05', '01');",
+			"mkdirSync(sessionDir, { recursive: true });",
+			"writeFileSync(",
+			"  join(sessionDir, `rollout-2026-05-01T01-21-00-${forkedSessionId}.jsonl`),",
+			"  [",
+			"    JSON.stringify({ timestamp: '2026-04-30T17:21:00.000Z', type: 'session_meta', payload: { id: forkedSessionId, forked_from_id: parentSessionId } }),",
+			"    JSON.stringify({ timestamp: '2026-04-30T17:21:00.000Z', type: 'session_meta', payload: { id: parentSessionId } }),",
+			"    JSON.stringify({ timestamp: '2026-04-30T17:21:01.000Z', type: 'event_msg', payload: { type: 'user_message', message: 'FORKED_SESSION' } }),",
+			"    '',",
+			"  ].join('\\n'),",
+			"  'utf8',",
+			");",
+			"process.exit(0);",
+		]);
+		const result = runWrapper(fixtureRoot, ["exec", "status"], {
+			CODEX_HOME: codexHome,
+			CODEX_MULTI_AUTH_REAL_CODEX_BIN: fakeBin,
+			CODEX_MULTI_AUTH_RUNTIME_ROTATION_PROXY: "0",
+		});
+
+		expect(result.status).toBe(0);
+		const entries = readFileSync(join(codexHome, "session_index.jsonl"), "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { id: string; thread_name: string });
+		expect(entries).toContainEqual(
+			expect.objectContaining({ id: forkedSessionId, thread_name: "FORKED_SESSION" }),
+		);
+		expect(entries.filter((entry) => entry.id === parentSessionId)).toHaveLength(1);
+	});
+
 	it("serializes concurrent local session index repairs", async () => {
 		const fixtureRoot = createWrapperFixture();
 		const codexHome = join(fixtureRoot, "codex-home");

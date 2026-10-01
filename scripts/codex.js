@@ -6403,7 +6403,13 @@ function parseRolloutIndexEntry(rolloutPath) {
 		if (typeof record?.timestamp === "string") {
 			updatedAt = record.timestamp;
 		}
-		if (record?.type === "session_meta" && typeof record.payload?.id === "string") {
+		// Forked rollouts append the parent's session_meta after their own, so
+		// only the first one names this rollout.
+		if (
+			!hasSessionMeta &&
+			record?.type === "session_meta" &&
+			typeof record.payload?.id === "string"
+		) {
 			id = record.payload.id;
 			hasSessionMeta = true;
 		}
