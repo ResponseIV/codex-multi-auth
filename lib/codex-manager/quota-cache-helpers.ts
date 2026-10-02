@@ -9,6 +9,7 @@ import {
 	normalizeQuotaEmail,
 } from "../quota-readiness.js";
 import {
+	mergeQuotaCacheEntry,
 	type QuotaCacheData,
 	type QuotaCacheEntry,
 } from "../quota-cache.js";
@@ -77,6 +78,7 @@ function quotaEntryFromSnapshot(snapshot: CodexQuotaSnapshot): QuotaCacheEntry {
 	return {
 		...(snapshot.primingCompleted ? {primingCompleted: true} : {}),
 		...(snapshot.primingFailure ? {primingFailure: snapshot.primingFailure} : {}),
+		...(snapshot.primingCompleted || snapshot.primingFailure ? { primingObservedAt: snapshot.primingObservedAt ?? Date.now() } : {}),
 		updatedAt: snapshot.observedAt ?? Date.now(),
 		status: snapshot.status,
 		model: snapshot.model,
@@ -109,7 +111,7 @@ export function updateQuotaCacheForAccount(
 	const hasUniqueAccountId =
 		accountId !== null && hasUniqueQuotaAccountId(accounts, account);
 	if (hasUniqueAccountId) {
-		cache.byAccountId[accountId] = nextEntry;
+		cache.byAccountId[accountId] = mergeQuotaCacheEntry(cache.byAccountId[accountId], nextEntry);
 		changed = true;
 	}
 	const email = normalizeQuotaEmail(account.email);
@@ -118,7 +120,7 @@ export function updateQuotaCacheForAccount(
 		hasSafeQuotaEmailFallback(emailFallbackState, account) &&
 		!hasUniqueAccountId
 	) {
-		cache.byEmail[email] = nextEntry;
+		cache.byEmail[email] = mergeQuotaCacheEntry(cache.byEmail[email], nextEntry);
 		changed = true;
 	} else if (email && cache.byEmail[email]) {
 		delete cache.byEmail[email];
@@ -132,7 +134,7 @@ export function updateQuotaCacheForWorkspace(cache: QuotaCacheData, account: Acc
     const key = quotaWorkspaceKey(account, workspaceId);
     if (!key) return;
     cache.byWorkspace ??= {};
-    cache.byWorkspace[key] = quotaEntryFromSnapshot(snapshot);
+    cache.byWorkspace[key] = mergeQuotaCacheEntry(cache.byWorkspace[key], quotaEntryFromSnapshot(snapshot));
     if (workspaceId === normalizeQuotaAccountId(account.accountId)) {
         updateQuotaCacheForAccount(cache, account, snapshot, accounts);
     } else {

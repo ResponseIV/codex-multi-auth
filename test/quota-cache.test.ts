@@ -53,6 +53,41 @@ describe("quota cache", () => {
     expect(loaded.byAccountId.fixture?.primingCompleted).toBeUndefined();
   });
 
+  it.each(["completed", "failed"] as const)("retains a later %s priming result without overwriting concurrent quota", async outcome => {
+    const { loadQuotaCache, saveQuotaCache } = await import("../lib/quota-cache.js");
+    const { updateQuotaCacheForWorkspace, cloneQuotaCacheData } = await import("../lib/codex-manager/quota-cache-helpers.js");
+    const { quotaWorkspaceKey } = await import("../lib/quota-readiness.js");
+    const account = { recordId: "fixture", accountId: "personal", refreshToken: "fixture", addedAt: 1, lastUsed: 1 };
+    const key = quotaWorkspaceKey(account, "personal")!;
+    const baseline = await loadQuotaCache();
+    const priming = cloneQuotaCacheData(baseline), plain = cloneQuotaCacheData(baseline);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(3000);
+    try {
+      updateQuotaCacheForWorkspace(priming, account, "personal", {
+        observedAt: 1000, status: 200, model: "fixture", planType: "promax", primary: { usedPercent: 0 }, secondary: {},
+        ...(outcome === "completed" ? { primingCompleted: true } : { primingFailure: "timed out" as const }),
+      }, [account]);
+    } finally { clock.mockRestore(); }
+    updateQuotaCacheForWorkspace(plain, account, "personal", { observedAt: 2000, status: 200, model: "fixture", planType: "promax", primary: { usedPercent: 10 }, secondary: {} }, [account]);
+    await saveQuotaCache(plain, baseline);
+    await saveQuotaCache(priming, baseline);
+    let saved = await loadQuotaCache();
+    for (const entry of [saved.byWorkspace?.[key], saved.byAccountId.personal]) {
+      expect(entry).toMatchObject({ updatedAt: 2000, primary: { usedPercent: 10 } });
+      expect(outcome === "completed" ? entry?.primingCompleted : entry?.primingFailure).toBe(outcome === "completed" ? true : "timed out");
+    }
+    // A delayed save of that same plain check must not erase the later outcome.
+    await saveQuotaCache(plain, baseline);
+    saved = await loadQuotaCache();
+    expect(outcome === "completed" ? saved.byWorkspace?.[key]?.primingCompleted : saved.byWorkspace?.[key]?.primingFailure).toBe(outcome === "completed" ? true : "timed out");
+    // A genuinely subsequent observation supersedes the old outcome.
+    const newer = cloneQuotaCacheData(saved);
+    updateQuotaCacheForWorkspace(newer, account, "personal", { observedAt: 4000, status: 200, model: "fixture", primary: { usedPercent: 20 }, secondary: {} }, [account]);
+    await saveQuotaCache(newer, saved);
+    expect((await loadQuotaCache()).byWorkspace?.[key]?.primingCompleted).toBeUndefined();
+    expect((await loadQuotaCache()).byWorkspace?.[key]?.primingFailure).toBeUndefined();
+  });
+
   it("returns empty cache by default", async () => {
     const { loadQuotaCache } = await import("../lib/quota-cache.js");
     const data = await loadQuotaCache();
