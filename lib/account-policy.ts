@@ -155,8 +155,10 @@ export async function loadAccountPolicyStore(options: { strict?: boolean } = {})
 			}
 			for (const [key, row] of Object.entries(parsed.accounts)) {
 				if (!key.startsWith("sha256:")) continue;
-				// Legacy rows may omit autoPrime; an explicit malformed value is not OFF.
-				if (!isRecord(row) || ("autoPrime" in row && typeof row.autoPrime !== "boolean")) {
+				// Legacy rows may omit flags; explicit malformed values are not OFF.
+				if (!isRecord(row) || ["autoPrime", "paused", "drained"].some(
+					flag => flag in row && typeof row[flag] !== "boolean",
+				)) {
 					throw new Error("Invalid account policy row");
 				}
 			}
