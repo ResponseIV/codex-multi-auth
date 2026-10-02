@@ -90,9 +90,10 @@ vi.mock("../lib/accounts.js", async () => {
 	};
 });
 
-vi.mock("../lib/quota-cache.js", async () =>
+vi.mock("../lib/quota-cache.js", async (importOriginal) =>
 	(await import("./helpers/cli-test-fixtures.js")).quotaCacheModuleMock(
 		quotaCacheMocks,
+		await importOriginal<typeof import("../lib/quota-cache.js")>(),
 	),
 );
 

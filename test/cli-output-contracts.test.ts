@@ -113,7 +113,8 @@ vi.mock("../lib/quota-probe.js", async (importOriginal) => ({
 	fetchCodexQuotaSnapshot: fetchCodexQuotaSnapshotMock,
 }));
 
-vi.mock("../lib/quota-cache.js", () => ({
+vi.mock("../lib/quota-cache.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/quota-cache.js")>()),
 	loadQuotaCache: loadQuotaCacheMock,
 	saveQuotaCache: saveQuotaCacheMock,
 }));
