@@ -177,7 +177,7 @@
 		"@codex-ai/plugin": "file:vendor/codex-ai-plugin",
 		"@codex-ai/sdk": "file:vendor/codex-ai-sdk",
 		"hono": "4.13.9",
-		"undici": "6.28.0",
+		"undici": "6.29.0",
 		"ws": "8.21.3",
 		"zod": "4.4.3"
 	},
