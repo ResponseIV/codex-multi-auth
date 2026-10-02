@@ -210,14 +210,18 @@ export function mergeQuotaCacheEntry(latest: QuotaCacheEntry | undefined, update
 	const quota = update.updatedAt >= latest.updatedAt ? update : latest;
 	const outcomeTime = (entry: QuotaCacheEntry) => entry.primingCompleted || entry.primingFailure
 		? entry.primingObservedAt ?? entry.updatedAt : -Infinity;
-	const evidence = outcomeTime(update) >= outcomeTime(latest) ? update : latest;
+	// A timeout does not undo a completion from an overlapping attempt.
+	// Only completions at/after the newest quota observation remain relevant.
+	const completion = [update, latest].filter(entry => entry.primingCompleted && outcomeTime(entry) >= quota.updatedAt)
+		.sort((a, b) => outcomeTime(b) - outcomeTime(a))[0];
+	const evidence = completion ?? (outcomeTime(update) >= outcomeTime(latest) ? update : latest);
 	const result = { ...quota };
 	delete result.primingCompleted;
 	delete result.primingFailure;
 	delete result.primingObservedAt;
 	if (outcomeTime(evidence) >= quota.updatedAt) {
 		if (evidence.primingCompleted) result.primingCompleted = true;
-		if (evidence.primingFailure) result.primingFailure = evidence.primingFailure;
+		else if (evidence.primingFailure) result.primingFailure = evidence.primingFailure;
 		if (evidence.primingObservedAt !== undefined) result.primingObservedAt = evidence.primingObservedAt;
 	}
 	return result;
