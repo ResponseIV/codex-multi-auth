@@ -5,6 +5,49 @@ Dates use ISO format (`YYYY-MM-DD`).
 
 This repository's current stable release line is `2.x`. Full release notes live in [`docs/releases/`](docs/releases/) — this file is the short version. Pre-`0.1.0` iteration history is archived in [`docs/releases/legacy-pre-0.1-history.md`](docs/releases/legacy-pre-0.1-history.md). Conventions: entry headings are `## [x.y.z] - YYYY-MM-DD`; section headings come from `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Internal`, `Notes`; issue and pull-request references link as `[#N](https://github.com/ndycode/codex-multi-auth/pull/N)`.
 
+## [2.19.0] - 2026-10-02
+
+Subscription visibility and launch performance: `status`, `list`, and
+`check accounts` report the selected workspace, observed plan, and first-use
+priming state per account, with opt-in priming for unused Pro Max
+subscriptions — and the shadow Codex home no longer reads multi-gigabyte
+linked SQLite files into memory on every launch and cleanup.
+[Full notes](docs/releases/v2.19.0.md).
+
+### Added
+
+- Per-account subscription status on `status` (text and `--json`), `list`,
+  and `check accounts`: selected workspace, observed plan label, `autoPrime`
+  setting, first-use priming state, and observation freshness ([#726](https://github.com/ndycode/codex-multi-auth/pull/726))
+- `check accounts --prime` opt-in first-use priming for unused personal
+  subscriptions; automatic priming for `autoPrime` policy accounts now
+  recognizes `promax`/Pro 500 ([#726](https://github.com/ndycode/codex-multi-auth/pull/726))
+- `byWorkspace` quota-cache namespace keyed by hashed record+workspace
+  identity so organization members sharing an `accountId` cannot collide;
+  token-only accounts derive workspace identity from the access token ([#726](https://github.com/ndycode/codex-multi-auth/pull/726))
+
+### Fixed
+
+- Linked shadow-home SQLite files (main database plus `-wal`/`-shm`
+  sidecars) are no longer read into memory for launch snapshots or
+  sync-back — the shadow path is the original file itself ([#727](https://github.com/ndycode/codex-multi-auth/pull/727))
+- Forked rollouts index and display by their first `session_meta`; the
+  parent's appended metadata no longer hijacks the rollout id ([#727](https://github.com/ndycode/codex-multi-auth/pull/727))
+- Concurrent quota-cache writes no longer lose priming outcomes:
+  `primingObservedAt` merges evidence independently of the quota timestamp,
+  an overlapping timeout cannot erase a completion, and a genuinely newer
+  observation still retires stale evidence ([#726](https://github.com/ndycode/codex-multi-auth/pull/726))
+- Strict policy reads reject malformed `autoPrime`/`paused`/`drained` rows;
+  load failures surface as `unknown` instead of `off` ([#726](https://github.com/ndycode/codex-multi-auth/pull/726))
+- Disabled or invalid workspace selections never fall back to a sibling
+  workspace or the stored binding, including token-only accounts ([#726](https://github.com/ndycode/codex-multi-auth/pull/726))
+
+### Security
+
+- `undici` 6.28.0 → 6.29.0: high-severity fixes for WebSocket
+  permessage-deflate decompression DoS, response splitting via the retry
+  interceptor, and unrequested WebSocket subprotocol DoS
+
 ## [2.18.0] - 2026-09-30
 
 Model-catalog update tracking upstream `openai/codex@b1e72963`: GPT-6.1 Sol
