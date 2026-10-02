@@ -141,8 +141,10 @@ export type QuotaCacheMocks = ReturnType<typeof createQuotaCacheMocks>;
 
 export function quotaCacheModuleMock(
 	mocks: QuotaCacheMocks,
+	actual?: Record<string, unknown>,
 ): Record<string, unknown> {
 	return {
+		...actual,
 		loadQuotaCache: mocks.loadQuotaCache,
 		saveQuotaCache: mocks.saveQuotaCache,
 	};

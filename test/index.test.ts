@@ -229,7 +229,8 @@ vi.mock("../lib/runtime/runtime-current-account.js", async () => {
 	};
 });
 
-vi.mock("../lib/quota-cache.js", () => ({
+vi.mock("../lib/quota-cache.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/quota-cache.js")>()),
 	loadQuotaCache: loadQuotaCacheMock,
 }));
 

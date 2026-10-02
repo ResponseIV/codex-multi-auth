@@ -1,3 +1,4 @@
+vi.mock("../lib/account-policy.js", async importOriginal => ({...await importOriginal<typeof import("../lib/account-policy.js")>(), loadAccountPolicyStore: vi.fn(async () => ({version: 1, accounts: {}}))}));
 const discoveryMocks=vi.hoisted(()=>({resets:vi.fn(),models:vi.fn()}));
 vi.mock("../lib/runtime/account-reset-credits.js",()=>({refreshAndPrintResetCredits:discoveryMocks.resets}));
 vi.mock("../lib/runtime/model-discovery-status.js",()=>({refreshAndPrintModelInventory:discoveryMocks.models}));
@@ -371,4 +372,38 @@ it("continues model discovery when reset-credit persistence fails",async()=>{
  discoveryMocks.resets.mockRejectedValueOnce(Error("state locked"));
  await expect(runHealthCheck({discoverModels:true})).resolves.toBeUndefined();
  expect(discoveryMocks.models).toHaveBeenCalled();expect(logged()).toContain("could not be refreshed");
+});
+
+it.each([false, true])("labels and caches the selected Personal workspace in check (refresh=%s)", async forceRefresh => {
+ const a = account("scope", {workspaces: [{id:"org", name:"Business"},{id:"personal", name:"Personal (role:owner)"}], currentWorkspaceIndex:1});
+ loadAccountsMock.mockResolvedValue(storageWith([a]));
+ queuedRefreshMock.mockResolvedValue({type:"success", access:a.accessToken, refresh:a.refreshToken, expires:REAL_NOW+3600000});
+ fetchCodexQuotaSnapshotMock.mockResolvedValue({...snapshot(), planType:"promax", primingFailure:"timed out"});
+ await runHealthCheck({liveProbe:true, forceRefresh});
+ expect(fetchCodexQuotaSnapshotMock).toHaveBeenCalledWith(expect.objectContaining({accountId:"personal"}));
+ expect(logged()).toContain("Personal · Pro 500 · Auto-prime OFF · Priming failed");
+ const saved = saveQuotaCacheMock.mock.calls.at(-1)![0];
+ expect(Object.values(saved.byWorkspace)).toContainEqual(expect.objectContaining({planType:"promax",primingFailure:"timed out"}));
+});
+
+it("does not probe a disabled selected workspace through its stored binding", async () => {
+ loadAccountsMock.mockResolvedValue(storageWith([account("scope", {workspaces:[{id:"personal",name:"Personal",enabled:false}]} )]));
+ await runHealthCheck({liveProbe:true});
+ expect(fetchCodexQuotaSnapshotMock).not.toHaveBeenCalled();
+});
+
+
+it("shows unknown auto-prime when a real policy read fails", async () => {
+ const {promises:fs} = await import("node:fs");
+ const policies = await import("../lib/account-policy.js");
+ const real = await vi.importActual<typeof policies>("../lib/account-policy.js");
+ const read = fs.readFile.bind(fs);
+ const spy = vi.spyOn(fs,"readFile").mockImplementation((...args: Parameters<typeof fs.readFile>) => String(args[0]) === real.getAccountPolicyPath() ? Promise.reject(Object.assign(new Error("fixture denied"), {code:"EACCES"})) : read(...args));
+ vi.mocked(policies.loadAccountPolicyStore).mockImplementationOnce(real.loadAccountPolicyStore);
+ loadAccountsMock.mockResolvedValue(storageWith([account("policy")]));
+ fetchCodexQuotaSnapshotMock.mockResolvedValue(snapshot());
+ try {
+  await runHealthCheck({liveProbe:true});
+  expect(logged()).toContain("Auto-prime unknown");
+ } finally {spy.mockRestore();}
 });

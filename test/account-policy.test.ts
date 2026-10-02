@@ -33,6 +33,55 @@ describe("account policy store", () => {
 		await removeWithRetry(tempDir, { recursive: true, force: true });
 	});
 
+	it("distinguishes missing policies from malformed policies in strict reads", async () => {
+		const {loadAccountPolicyStore, getAccountPolicyPath} = await import("../lib/account-policy.js");
+		await expect(loadAccountPolicyStore({strict:true})).resolves.toEqual({version:1,accounts:{}});
+		for (const content of ["{broken", "null", '{"version":1,"accounts":[]}']) {
+			await fs.writeFile(getAccountPolicyPath(), content);
+			await expect(loadAccountPolicyStore({strict:true})).rejects.toThrow();
+			await expect(loadAccountPolicyStore()).resolves.toEqual({version:1,accounts:{}});
+		}
+	});
+
+	it.each([null, [], "invalid", {autoPrime:"true"}, {autoPrime:0}, {autoPrime:null}, {paused:"true"}, {paused:0}, {drained:"false"}, {drained:null}])("rejects malformed account policy rows in strict mode: %j", async row => {
+		const {loadAccountPolicyStore, getAccountPolicyPath} = await import("../lib/account-policy.js");
+		await fs.writeFile(getAccountPolicyPath(), JSON.stringify({version:1,accounts:{"sha256:fixture":row}}));
+		await expect(loadAccountPolicyStore({strict:true})).rejects.toThrow("Invalid account policy");
+		await expect(loadAccountPolicyStore()).resolves.toMatchObject({accounts:{"sha256:fixture":{autoPrime:false}}});
+	});
+
+	it.each([{}, {autoPrime:false}, {autoPrime:true}])("accepts legacy and boolean priming policies in strict mode: %j", async row => {
+		const {loadAccountPolicyStore, getAccountPolicyPath} = await import("../lib/account-policy.js");
+		await fs.writeFile(getAccountPolicyPath(), JSON.stringify({version:1,accounts:{"sha256:fixture":row}}));
+		await expect(loadAccountPolicyStore({strict:true})).resolves.toMatchObject({accounts:{"sha256:fixture":{autoPrime:"autoPrime" in row && row.autoPrime === true}}});
+	});
+
+	it.each(["EBUSY", "EPERM"])("preserves strict failure and tolerant fallback after exhausted %s retries", async code => {
+		const { loadAccountPolicyStore } = await import("../lib/account-policy.js");
+		const logger = await import("../lib/logger.js");
+		const failure = Object.assign(new Error("fixture locked"), { code });
+		const read = vi.spyOn(fs, "readFile").mockRejectedValue(failure);
+		const warn = vi.spyOn(logger, "logWarn").mockImplementation(() => undefined);
+		vi.useFakeTimers();
+		try {
+			const strict = expect(loadAccountPolicyStore({ strict: true })).rejects.toBe(failure);
+			await vi.runAllTimersAsync();
+			await strict;
+			expect(read).toHaveBeenCalledTimes(5);
+			expect(warn).not.toHaveBeenCalled();
+			read.mockClear();
+			const tolerant = loadAccountPolicyStore();
+			await vi.runAllTimersAsync();
+			await expect(tolerant).resolves.toEqual({ version: 1, accounts: {} });
+			expect(read).toHaveBeenCalledTimes(5);
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining("fixture locked"));
+		} finally {
+			read.mockRestore();
+			warn.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
 	it("keeps automatic first-use priming off for fresh accounts and pre-2.17 policy files", async () => {
 		const { getAccountPolicyKey, getAccountPolicyPath, loadAccountPolicyStore, upsertAccountPolicy } = await import("../lib/account-policy.js");
 		const { runAutomaticAccountChecks } = await import("../lib/runtime/automatic-account-checks.js");

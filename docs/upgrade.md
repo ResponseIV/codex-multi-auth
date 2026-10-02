@@ -115,6 +115,16 @@ codex-multi-auth fix --live --model gpt-6.1-sol
 
 `preuninstall.js` ships in the package but is **not** an npm lifecycle hook on modern npm, so `npm uninstall -g` alone leaves residue. Run `codex-multi-auth uninstall` *before* removing the package — see [troubleshooting.md](troubleshooting.md#uninstall-completely).
 
+### Subscription Status And Pro Max Priming
+
+Unused Pro Max (Pro 500) subscriptions now qualify for opted-in first-use priming. `status` and `check accounts` show the observed plan, selected workspace, auto-prime setting, and first-use state; `status --json` adds a per-account `subscription` object (`planType`, `planLabel`, `selectedWorkspace`, `autoPrime`, `primingState`, `primingFailure`, `automaticBlock`, `freshness`, `observedAt`). Policy read failures show an unknown auto-prime setting rather than off.
+
+- Checks use the saved selected workspace; disabled or invalid selections do not fall back to the stored binding.
+- Status reads cached observations without network calls. Observations older than 30 minutes are stale, and 0% usage can still have a running reset timer.
+- Use `check accounts` to refresh observations, or add `--prime` to allow first-use completion. Existing priming policies are preserved.
+
+No new npm scripts or manual storage migration are required.
+
 ---
 
 ## Downgrading Past 2.17.0

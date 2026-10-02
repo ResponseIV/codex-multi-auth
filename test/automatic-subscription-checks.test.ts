@@ -10,7 +10,11 @@ import type { QuotaCacheData } from "../lib/quota-cache.js";
 import * as tokenRefresh from "../lib/runtime/rotation-token-refresh.js";
 import { removeWithRetry } from "./helpers/remove-with-retry.js";
 const { probe, saveQuota, loadQuota } = vi.hoisted(() => ({ probe: vi.fn(), saveQuota: vi.fn(), loadQuota: vi.fn() }));
-vi.mock("../lib/quota-cache.js", () => ({ loadQuotaCache: loadQuota, saveQuotaCache: saveQuota }));
+vi.mock("../lib/quota-cache.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/quota-cache.js")>()),
+	loadQuotaCache: loadQuota,
+	saveQuotaCache: saveQuota,
+}));
 vi.mock("../lib/quota-probe.js", () => ({ fetchCodexQuotaSnapshot: probe }));
 let dir: string;
 beforeEach(async () => { dir = await fs.mkdtemp(join(tmpdir(), "subscription-checks-")); vi.stubEnv("CODEX_MULTI_AUTH_DIR", dir); setStoragePathDirect(join(dir, "accounts.json")); saveQuota.mockReset(); loadQuota.mockReset().mockImplementation(async () => ({ byAccountId: {}, byEmail: {} })); probe.mockReset().mockResolvedValue({ status: 200, model: "fixture", primary: { usedPercent: 0 }, secondary: { usedPercent: 0 }, primingCompleted: true }); });

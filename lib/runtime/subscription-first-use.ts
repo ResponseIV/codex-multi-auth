@@ -4,7 +4,7 @@ import type { CodexQuotaSnapshot } from "../quota-probe.js";
 
 /** Only personal included subscriptions may receive an automatic first-use probe. */
 export function needsSubscriptionFirstUse(snapshot: Omit<CodexQuotaSnapshot, "model">, now: number): boolean {
-	if (snapshot.status !== 200 || !["plus", "pro", "prolite"].includes(snapshot.planType?.toLowerCase() ?? "")) return false;
+	if (snapshot.status !== 200 || !["plus", "pro", "prolite", "promax"].includes(snapshot.planType?.toLowerCase() ?? "")) return false;
 	const allWindows = [snapshot.primary, snapshot.secondary];
 	if (allWindows.some(window => typeof window.usedPercent === "number" && window.usedPercent !== 0)) return false;
 	const windows = allWindows.filter(window => window.windowMinutes !== 0);

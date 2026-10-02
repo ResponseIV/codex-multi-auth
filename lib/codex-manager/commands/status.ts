@@ -1,3 +1,4 @@
+import { subscriptionStatus, formatSubscriptionStatus } from "../formatters/subscription-status.js";
 import { resetSnapshotQuota } from "../../runtime/reset-credits.js";
 import { resetTargetForStoredAccount, type loadResetCreditState } from "../../runtime/account-reset-credits.js";
 import { subscriptionQuotaPreference, compareSubscriptionQuota, usesSubscriptionReserve, SUBSCRIPTION_RESERVE_PERCENT } from "../../runtime/subscription-quota-order.js";
@@ -161,7 +162,8 @@ export async function runStatusCommand(
 	const modelInventory = await deps.loadModelInventory?.();
  const resetCredits = await deps.loadResetCreditState?.().catch(()=>null);
  const resetSnapshot = (account: AccountStorageV3["accounts"][number]) => {const target=resetTargetForStoredAccount(account);return target?resetCredits?.snapshots[target.key]:undefined;};
-	const accountPolicies: Awaited<ReturnType<typeof loadAccountPolicyStore>> = await (deps.loadAccountPolicies ?? loadAccountPolicyStore)().catch(() => ({version:1 as const,accounts:{}}));
+	let policiesUnavailable = false;
+	const accountPolicies: Awaited<ReturnType<typeof loadAccountPolicyStore>> = await (deps.loadAccountPolicies ?? loadAccountPolicyStore)({strict:true}).catch(() => { policiesUnavailable = true; return {version:1 as const,accounts:{}}; });
 	if (!deps.json && deps.loadModelInventory) for (const line of formatModelInventory(modelInventory ?? null)) logInfo(line);
 	if (!storage || (storage.accounts.length === 0 && apiRoutes.length === 0)) {
 		const restoreReason = storage ? readRestoreReason(storage) : undefined;
@@ -218,6 +220,7 @@ export async function runStatusCommand(
 	const now = deps.getNow?.() ?? Date.now();
 	const activeIndex = storage.accounts.length ? deps.resolveActiveIndex(storage, "codex") : -1;
 	const quotaCache = await deps.loadQuotaCache?.() ?? null;
+ const subscriptionStatuses = storage.accounts.map(account => subscriptionStatus(account, findQuotaCacheEntryForAccount(quotaCache, account, storage.accounts), policiesUnavailable ? undefined : accountPolicies.accounts[getAccountPolicyKey(account)] ?? {}, now));
  const forecastQuotas = storage.accounts.map(account => {
   const cached = findQuotaCacheEntryForAccount(quotaCache, account, storage.accounts);
   const reset=resetSnapshot(account);
@@ -313,6 +316,7 @@ export async function runStatusCommand(
 			);
 			return {
 				index: i,
+				subscription: subscriptionStatuses[i],
         resetCreditsAvailable: resetSnapshot(account)?.availableCount ?? null,
         resetCreditsCheckedAt: resetSnapshot(account)?.updatedAt ?? null,
 				label: formatAccountLabel(account, i),
@@ -457,7 +461,8 @@ export async function runStatusCommand(
    : `inference not yet recorded; ${activity}`;
 		logInfo(`${paint(`${i + 1}. ${label}`, "heading")}${paint(markerLabel, markers.some(m => /disabled|cooldown|exhausted|limited|invalid/.test(m)) ? "warning" : "success")} ${paint(lastUsed, "muted")}`);
 		logInfo(`   ${paint(`priority tier: ${accountPolicies.accounts[getAccountPolicyKey(account, i)]?.priority ?? 1}`, "accent")}`);
-		if (accountPolicies.accounts[getAccountPolicyKey(account, i)]?.autoPrime) logInfo("   automatic first-use priming: on (router checks every 15 minutes)");
+		const subscription = subscriptionStatuses[i];
+		if (subscription) logInfo(`   ${formatSubscriptionStatus(subscription)}`);
   if (appBindStatus?.nativeOpenai) {
    const preference=quotaPreferences[i];
    const order=automaticOrder.get(i);

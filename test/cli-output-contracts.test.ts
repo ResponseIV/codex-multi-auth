@@ -113,7 +113,8 @@ vi.mock("../lib/quota-probe.js", async (importOriginal) => ({
 	fetchCodexQuotaSnapshot: fetchCodexQuotaSnapshotMock,
 }));
 
-vi.mock("../lib/quota-cache.js", () => ({
+vi.mock("../lib/quota-cache.js", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/quota-cache.js")>()),
 	loadQuotaCache: loadQuotaCacheMock,
 	saveQuotaCache: saveQuotaCacheMock,
 }));
@@ -323,9 +324,20 @@ describe("cli output contracts", () => {
 			expect(Array.isArray(accounts)).toBe(true);
 			expect(accounts).toHaveLength(2);
 			for (const account of accounts) {
-				expect(sortedKeys(account)).toEqual(["autoPrime", "automaticOrder", "current", "enabled", "forecastQuotaUpdatedAt", "forecastRiskLevel", "forecastRiskScore", "index", "label", "lastInferenceRequestAt", "lastUsed", "markers", "priority", "quotaDrainPerHour", "quotaResetAt", "reason", "resetCreditsAvailable", "resetCreditsCheckedAt", "selectionPreference", "subscriptionReserve"]);
+				expect(sortedKeys(account)).toEqual(["autoPrime", "automaticOrder", "current", "enabled", "forecastQuotaUpdatedAt", "forecastRiskLevel", "forecastRiskScore", "index", "label", "lastInferenceRequestAt", "lastUsed", "markers", "priority", "quotaDrainPerHour", "quotaResetAt", "reason", "resetCreditsAvailable", "resetCreditsCheckedAt", "selectionPreference", "subscription", "subscriptionReserve"]);
 				expect(account.priority).toBeTypeOf("number");
 				expect(account.autoPrime).toBe(false);
+				expect(account.subscription).toEqual({
+					planType: null,
+					planLabel: "Unknown plan",
+					selectedWorkspace: "Stored binding (workspace unknown)",
+					autoPrime: false,
+					primingState: "unknown",
+					primingFailure: null,
+					automaticBlock: account.enabled ? null : "account disabled",
+					freshness: "missing",
+					observedAt: null,
+				});
 				expect(account.subscriptionReserve).toBeTypeOf("boolean");
 				expect(account.index).toBeTypeOf("number");
 				expect(account.label).toBeTypeOf("string");

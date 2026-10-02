@@ -74,8 +74,8 @@ describe("quota-probe", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-	it("finishes one tiny check probe when a subscription reports zero usage", async () => {
-		const headers = makeQuotaHeaders({"x-codex-primary-used-percent":"0", "x-codex-secondary-used-percent":"0", "x-codex-primary-reset-after-seconds":"18000","x-codex-secondary-reset-after-seconds":"604800", "x-codex-plan-type":"prolite", "content-type":"text/event-stream"});
+	it.each(["prolite", "promax"])("finishes one tiny check probe when a %s subscription reports zero usage", async (plan) => {
+		const headers = makeQuotaHeaders({"x-codex-primary-used-percent":"0", "x-codex-secondary-used-percent":"0", "x-codex-primary-reset-after-seconds":"18000","x-codex-secondary-reset-after-seconds":"604800", "x-codex-plan-type":plan, "content-type":"text/event-stream"});
 		const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response('data: {"type":"response.completed","response":{"status":"completed"}}\n\n', {status:200,headers}));
 		vi.stubGlobal("fetch", fetchMock);
 		const snapshot = await fetchCodexQuotaSnapshot({accountId:"fixture",accessToken:"fixture-token",primeUnusedSubscription:true});

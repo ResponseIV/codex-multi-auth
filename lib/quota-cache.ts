@@ -19,6 +19,10 @@ export interface QuotaCacheWindow {
 }
 
 export interface QuotaCacheEntry {
+	primingCompleted?: boolean;
+	/** Completion/failure time, independent of the quota header observation. */
+	primingObservedAt?: number;
+	primingFailure?: "timed out" | "stream ended early" | "upstream failed" | "response too large" | "network error";
 	updatedAt: number;
 	status: number;
 	model: string;
@@ -97,6 +101,9 @@ function normalizeEntry(value: unknown): QuotaCacheEntry | null {
 	}
 
 	return {
+		...(value.primingCompleted === true ? {primingCompleted: true} : {}),
+		...(typeof value.primingFailure === "string" && ["timed out", "stream ended early", "upstream failed", "response too large", "network error"].includes(value.primingFailure) ? {primingFailure: value.primingFailure as QuotaCacheEntry["primingFailure"]} : {}),
+		...(normalizeNumber(value.primingObservedAt) !== undefined ? { primingObservedAt: normalizeNumber(value.primingObservedAt) } : {}),
 		updatedAt,
 		status,
 		model: model.trim(),
@@ -197,6 +204,29 @@ async function readQuotaCache(): Promise<QuotaCacheData> {
 	};
 }
 
+/** Merge quota and priming evidence independently; subsequent quota retires old outcomes. */
+export function mergeQuotaCacheEntry(latest: QuotaCacheEntry | undefined, update: QuotaCacheEntry): QuotaCacheEntry {
+	if (!latest) return update;
+	const quota = update.updatedAt >= latest.updatedAt ? update : latest;
+	const outcomeTime = (entry: QuotaCacheEntry) => entry.primingCompleted || entry.primingFailure
+		? entry.primingObservedAt ?? entry.updatedAt : -Infinity;
+	// A timeout does not undo a completion from an overlapping attempt.
+	// Only completions at/after the newest quota observation remain relevant.
+	const completion = [update, latest].filter(entry => entry.primingCompleted && outcomeTime(entry) >= quota.updatedAt)
+		.sort((a, b) => outcomeTime(b) - outcomeTime(a))[0];
+	const evidence = completion ?? (outcomeTime(update) >= outcomeTime(latest) ? update : latest);
+	const result = { ...quota };
+	delete result.primingCompleted;
+	delete result.primingFailure;
+	delete result.primingObservedAt;
+	if (outcomeTime(evidence) >= quota.updatedAt) {
+		if (evidence.primingCompleted) result.primingCompleted = true;
+		else if (evidence.primingFailure) result.primingFailure = evidence.primingFailure;
+		if (evidence.primingObservedAt !== undefined) result.primingObservedAt = evidence.primingObservedAt;
+	}
+	return result;
+}
+
 /** Reapply this run's changed entries, preserving unrelated or newer concurrent observations. */
 function mergeQuotaChanges(current: QuotaCacheData, proposed: QuotaCacheData, baseline: QuotaCacheData): QuotaCacheData {
 	const same = (a: QuotaCacheEntry | undefined, b: QuotaCacheEntry | undefined) => JSON.stringify(a) === JSON.stringify(b);
@@ -206,23 +236,12 @@ function mergeQuotaChanges(current: QuotaCacheData, proposed: QuotaCacheData, ba
 			if (same(before[key], next[key])) continue;
 			const latest = current[namespace]?.[key], update = next[key];
 			if (update) {
-				if (!latest || update.updatedAt >= latest.updatedAt) {
-					current[namespace] ??= {};
-					current[namespace][key] = update;
-				} else if (same(latest, before[key])) {
-					// The on-disk entry is still exactly the one this caller's
-					// baseline saw, so nothing concurrent touched this key:
-					// `update` is a deliberate write whose lower stamp can only
-					// come from a backward clock jump on this writer. Re-stamp
-					// it just ahead instead of silently losing it. A raced key
-					// (`!same`) falls through and keeps the on-disk entry: its
-					// higher stamp marks a newer observation, and bumping an
-					// older one past it would let stale quota data overwrite
-					// fresher data.
+				if (latest && update.updatedAt < latest.updatedAt && same(latest, before[key])) {
+					// Preserve the existing backward-clock handling for an unraced write.
 					update.updatedAt = latest.updatedAt + 1;
-					current[namespace] ??= {};
-					current[namespace][key] = update;
 				}
+				current[namespace] ??= {};
+				current[namespace][key] = mergeQuotaCacheEntry(latest, update);
 			} else if (same(latest, before[key])) {
 				delete current[namespace]?.[key];
 			}

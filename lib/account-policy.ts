@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import { basename, join } from "node:path";
 import { logWarn } from "./logger.js";
 import { getCodexMultiAuthDir } from "./runtime-paths.js";
@@ -145,12 +145,28 @@ export function getAccountPolicyKey(
 	return `sha256:${createHash("sha256").update(identity).digest("hex")}`;
 }
 
-export async function loadAccountPolicyStore(): Promise<AccountPolicyStore> {
+export async function loadAccountPolicyStore(options: { strict?: boolean } = {}): Promise<AccountPolicyStore> {
 	const path = getAccountPolicyPath();
-	if (!existsSync(path)) return emptyStore();
 	try {
-		return normalizeStore(JSON.parse(await readFileWithRetry(path)) as unknown);
+		const parsed: unknown = JSON.parse(await readFileWithRetry(path));
+		if (options.strict) {
+			if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.accounts)) {
+				throw new Error("Invalid account policy store");
+			}
+			for (const [key, row] of Object.entries(parsed.accounts)) {
+				if (!key.startsWith("sha256:")) continue;
+				// Legacy rows may omit flags; explicit malformed values are not OFF.
+				if (!isRecord(row) || ["autoPrime", "paused", "drained"].some(
+					flag => flag in row && typeof row[flag] !== "boolean",
+				)) {
+					throw new Error("Invalid account policy row");
+				}
+			}
+		}
+		return normalizeStore(parsed);
 	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyStore();
+		if (options.strict) throw error;
 		logWarn(
 			`Failed to load account policies from ${basename(path)}: ${
 				error instanceof Error ? error.message : String(error)
