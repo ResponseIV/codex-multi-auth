@@ -90,6 +90,67 @@ it("times out visibly rather than stealing a live writer's lock", async () => {
     a.child.send("go");
     await a.wait("saved");
 });
+it("makes a single acquisition attempt when waitMs is 0", async () => {
+    const { path, worker } = await fixture();
+    const a = launch(worker, path);
+    await a.wait("entered");
+    let attempts = 0;
+    const rename = fs.rename.bind(fs);
+    const spy = vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+        if (String(args[1]).endsWith(".write-lock")) attempts += 1;
+        return rename(...args);
+    });
+    try {
+        await expect(withFileTransactionLock(path, async () => {}, { waitMs: 0 })).rejects.toMatchObject({ code: "ELOCKED" });
+        expect(attempts).toBe(1);
+    }
+    finally {
+        spy.mockRestore();
+    }
+    a.child.send("go");
+    await a.wait("saved");
+});
+it("keeps retrying past the old flat-estimate attempt cap while budget remains", async () => {
+    const { path, worker } = await fixture();
+    const a = launch(worker, path);
+    await a.wait("entered");
+    let failedAttempts = 0;
+    const rename = fs.rename.bind(fs);
+    const spy = vi.spyOn(fs, "rename").mockImplementation(async (...args) => {
+        try {
+            return await rename(...args);
+        }
+        catch (error) {
+            // Release the holder after the third failed publish. The old
+            // ceil(100/40)+1 = 4-attempt cap (derived from a flat ~40ms guess)
+            // still has room here, but a 70ms budget got only 3 attempts —
+            // ~33-53ms of sleeps — and returned ELOCKED well inside the wait.
+            if (String(args[1]).endsWith(".write-lock") && ++failedAttempts === 3)
+                a.child.send("go");
+            throw error;
+        }
+    });
+    try {
+        await expect(withFileTransactionLock(path, async () => "acquired", { waitMs: 100 })).resolves.toBe("acquired");
+        expect(failedAttempts).toBeGreaterThanOrEqual(3);
+    }
+    finally {
+        spy.mockRestore();
+    }
+    await a.wait("saved");
+});
+it("does not exhaust a short waitMs budget before the requested wait has elapsed", async () => {
+    const { path, worker } = await fixture();
+    const a = launch(worker, path);
+    await a.wait("entered");
+    const started = Date.now();
+    await expect(withFileTransactionLock(path, async () => { throw Error("must not enter"); }, { waitMs: 120 })).rejects.toMatchObject({ code: "ELOCKED" });
+    // The old cap slept at most ~85ms on a 120ms budget; the schedule-derived
+    // cap must wait at least the budget (minus timer slack) before ELOCKED.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(110);
+    a.child.send("go");
+    await a.wait("saved");
+});
 it("releases on exceptions and supports nested persistence under the same lease", async () => {
     const { path } = await fixture();
     await expect(withFileTransactionLock(path, async () => withFileTransactionLock(path, async () => { throw Error("fixture failure"); }))).rejects.toThrow("fixture failure");

@@ -135,6 +135,7 @@ vi.mock("../lib/runtime/app-bind.js", () => ({
 vi.mock("../lib/codex-cli/state.js", () => ({
 	getCodexCliAuthPath: vi.fn(() => "/mock/.codex/auth.json"),
 	getCodexCliConfigPath: vi.fn(() => "/mock/.codex/config.toml"),
+	getCodexCliAccountsPath: vi.fn(() => "/mock/.codex/accounts.json"),
 	loadCodexCliState: loadCodexCliStateMock,
 }));
 

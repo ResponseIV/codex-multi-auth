@@ -169,6 +169,214 @@ describe("account policy store", () => {
 			getAccountPolicyKey({ email: "user@example.com", refreshToken: "refresh-a" }),
 		);
 	});
+
+	it("re-applies a mutation over the freshest store instead of merging whole records", async () => {
+		const {
+			getAccountPolicyPath,
+			loadAccountPolicyStore,
+			updateAccountPolicyStore,
+		} = await import("../lib/account-policy.js");
+		const key = "sha256:contended";
+		// A concurrent process already committed fields we never touched, with a
+		// much newer updatedAt than our mutation's clock — under the old
+		// whole-record updatedAt merge, our save would either clobber those
+		// fields wholesale or be silently discarded as "older".
+		await fs.writeFile(
+			getAccountPolicyPath(),
+			JSON.stringify({
+				version: 1,
+				accounts: {
+					[key]: {
+						accountKey: key,
+						tags: ["team"],
+						weight: 5,
+						paused: false,
+						drained: false,
+						note: "other writer",
+						updatedAt: 1_000_000_000_000,
+					},
+				},
+			}),
+		);
+
+		const written = await updateAccountPolicyStore((store) => ({
+			result: (() => {
+				const record = store.accounts[key]!;
+				record.paused = true;
+				return record;
+			})(),
+			dirty: true,
+		}));
+		expect(written.paused).toBe(true);
+
+		const loaded = await loadAccountPolicyStore();
+		// Our paused mutation landed AND the other fields the fresher record
+		// carried are preserved — disjoint field updates both survive.
+		expect(loaded.accounts[key]).toMatchObject({
+			tags: ["team"],
+			weight: 5,
+			paused: true,
+			note: "other writer",
+		});
+	});
+
+	it("does not write the store when the mutation reports no change", async () => {
+		const { getAccountPolicyPath, updateAccountPolicyStore } = await import(
+			"../lib/account-policy.js"
+		);
+		const result = await updateAccountPolicyStore(() => ({
+			result: "skipped",
+			dirty: false,
+		}));
+		expect(result).toBe("skipped");
+		await expect(fs.stat(getAccountPolicyPath())).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
+
+	it("survives a backward clock jump between writes (hybrid updatedAt floor)", async () => {
+		const {
+			getAccountPolicyKey,
+			loadAccountPolicyStore,
+			saveAccountPolicyStore,
+			upsertAccountPolicy,
+		} = await import("../lib/account-policy.js");
+		const key = getAccountPolicyKey({ accountId: "skew-acct" }, 0);
+
+		// First write lands at wall time T2.
+		const first = await loadAccountPolicyStore();
+		upsertAccountPolicy(first, key, (policy) => {
+			policy.note = "before-skew";
+		}, 5_000);
+		await saveAccountPolicyStore(first);
+
+		// Clock regresses to T1 < T2; the next load sees the T2 stamp, so the
+		// upsert must clamp forward or the merge drops this write silently.
+		const reloaded = await loadAccountPolicyStore();
+		const mutated = upsertAccountPolicy(reloaded, key, (policy) => {
+			policy.note = "after-skew";
+		}, 100);
+		expect(mutated.updatedAt).toBe(5_001);
+		await saveAccountPolicyStore(reloaded);
+
+		const final = await loadAccountPolicyStore();
+		expect(final.accounts[key]?.note).toBe("after-skew");
+		expect(final.accounts[key]?.updatedAt).toBe(5_001);
+	});
+
+	it("does not lose a deliberate edit that races a concurrent write under clock skew", async () => {
+		const {
+			getAccountPolicyKey,
+			loadAccountPolicyStore,
+			saveAccountPolicyStore,
+			upsertAccountPolicy,
+		} = await import("../lib/account-policy.js");
+		const key = getAccountPolicyKey({ accountId: "race-acct" }, 0);
+
+		// Seed the key at wall time T2.
+		const seed = await loadAccountPolicyStore();
+		upsertAccountPolicy(seed, key, (policy) => {
+			policy.note = "base";
+		}, 5_000);
+		await saveAccountPolicyStore(seed);
+
+		// This writer loads its snapshot BEFORE the concurrent write lands.
+		const working = await loadAccountPolicyStore();
+		const baseline = structuredClone(working);
+
+		// A concurrent writer lands a newer entry first.
+		const raced = await loadAccountPolicyStore();
+		upsertAccountPolicy(raced, key, (policy) => {
+			policy.weight = 9;
+			policy.note = "raced";
+		}, 7_000);
+		await saveAccountPolicyStore(raced);
+
+		// The clock regressed to T1 << T2: the snapshot floor stamps 5_001,
+		// below the raced on-disk 7_000 — without a merge-time floor over the
+		// fresh disk entry this deliberate edit is silently dropped.
+		const mutated = upsertAccountPolicy(working, key, (policy) => {
+			policy.paused = true;
+		}, 100);
+		expect(mutated.updatedAt).toBe(5_001);
+		await saveAccountPolicyStore(working, baseline);
+
+		const final = await loadAccountPolicyStore();
+		expect(final.accounts[key]?.paused).toBe(true);
+		expect(final.accounts[key]?.updatedAt).toBe(7_001);
+	});
+
+	it("leaves a raced newer entry alone when the caller only carried it", async () => {
+		const {
+			getAccountPolicyKey,
+			loadAccountPolicyStore,
+			saveAccountPolicyStore,
+			upsertAccountPolicy,
+		} = await import("../lib/account-policy.js");
+		const editedKey = getAccountPolicyKey({ accountId: "edit-acct" }, 0);
+		const carriedKey = getAccountPolicyKey({ accountId: "other-acct" }, 1);
+
+		const seed = await loadAccountPolicyStore();
+		upsertAccountPolicy(seed, editedKey, (policy) => {
+			policy.note = "k";
+		}, 5_000);
+		upsertAccountPolicy(seed, carriedKey, (policy) => {
+			policy.note = "l";
+		}, 5_000);
+		await saveAccountPolicyStore(seed);
+
+		const working = await loadAccountPolicyStore();
+		const baseline = structuredClone(working);
+
+		// A concurrent writer moves ONLY the carried key to a newer entry.
+		const raced = await loadAccountPolicyStore();
+		upsertAccountPolicy(raced, carriedKey, (policy) => {
+			policy.weight = 9;
+		}, 9_000);
+		await saveAccountPolicyStore(raced);
+
+		// The caller edits only the other key; the carried snapshot copy of
+		// carriedKey must not be re-stamped over the raced write.
+		upsertAccountPolicy(working, editedKey, (policy) => {
+			policy.paused = true;
+		}, 100);
+		await saveAccountPolicyStore(working, baseline);
+
+		const final = await loadAccountPolicyStore();
+		expect(final.accounts[editedKey]?.paused).toBe(true);
+		expect(final.accounts[carriedKey]?.weight).toBe(9);
+		expect(final.accounts[carriedKey]?.updatedAt).toBe(9_000);
+	});
+
+	it("keeps updatedAt order for saves without a baseline", async () => {
+		const {
+			getAccountPolicyKey,
+			loadAccountPolicyStore,
+			saveAccountPolicyStore,
+			upsertAccountPolicy,
+		} = await import("../lib/account-policy.js");
+		const key = getAccountPolicyKey({ accountId: "compat-acct" }, 0);
+
+		const seed = await loadAccountPolicyStore();
+		upsertAccountPolicy(seed, key, (policy) => {
+			policy.note = "base";
+		}, 5_000);
+		await saveAccountPolicyStore(seed);
+
+		// A stale snapshot saved without a baseline is a plain `updatedAt >=`
+		// upsert: it must not clobber a concurrent newer entry.
+		const stale = await loadAccountPolicyStore();
+		const raced = await loadAccountPolicyStore();
+		upsertAccountPolicy(raced, key, (policy) => {
+			policy.note = "newer";
+		}, 9_000);
+		await saveAccountPolicyStore(raced);
+		await saveAccountPolicyStore(stale);
+
+		const final = await loadAccountPolicyStore();
+		expect(final.accounts[key]?.note).toBe("newer");
+		expect(final.accounts[key]?.updatedAt).toBe(9_000);
+	});
 });
 
 

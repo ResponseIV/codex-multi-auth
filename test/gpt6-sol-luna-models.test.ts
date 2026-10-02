@@ -65,13 +65,13 @@ describe("GPT-6 Sol and Luna", () => {
 			expect(resolveNormalizedModel("gpt-6-terra")).toBe("gpt-6-sol");
 		});
 
-		it("leaves Astra, aeon and the bare flagship alias where they were", () => {
+		it("leaves Astra, the retired aeon slug and the bare flagship alias where they were", () => {
 			expect(resolveNormalizedModel("gpt-6")).toBe("gpt-6-astra");
 			expect(resolveNormalizedModel("gpt-6-turbo")).toBe("gpt-6-astra");
 			expect(resolveNormalizedModel("gpt-6-astra-pro")).toBe("gpt-6-astra");
 			expect(resolveNormalizedModel("Astra Pro")).toBe("gpt-6-astra");
 			expect(resolveNormalizedModel("gpt-6-astra-aeon-2026-09-03")).toBe(
-				"gpt-6-astra-aeon",
+				"gpt-6-astra",
 			);
 		});
 
@@ -229,8 +229,10 @@ describe("GPT-6 Sol and Luna", () => {
 				).toBeCloseTo(34.4, 10);
 			});
 
-			it("leaves models with no long-context data on their one rate", () => {
-				expect(estimateUsageCostUsd("gpt-5.5", at(1_000_000))).toBe(2);
+			it("bills a retired id at its replacement's long-context rate", () => {
+				// `gpt-5.5` runs on GPT-6 Sol now, and Sol's $4 long-context rate
+				// applies past 272K — the retired id does not keep its old flat $2.
+				expect(estimateUsageCostUsd("gpt-5.5", at(1_000_000))).toBe(4);
 			});
 		});
 	});
@@ -277,12 +279,17 @@ describe("GPT-6 Sol and Luna", () => {
 		}
 
 		it("walks Sol down through the 5.6 tier it replaces", () => {
-			// `gpt-5.5` is the floor now that `gpt-5.4` is retired.
-			expect(walk("gpt-6-sol")).toEqual(["gpt-5.6-sol", "gpt-5.5"]);
+			// 5.6 Sol hands off to GPT-6 Luna — the broadest-entitlement model —
+			// and Luna's row lands on the light 5.6 tier last.
+			expect(walk("gpt-6-sol")).toEqual([
+				"gpt-5.6-sol",
+				"gpt-6-luna",
+				"gpt-5.6-luna",
+			]);
 		});
 
 		it("walks Luna down through 5.6 Luna instead of stranding there", () => {
-			expect(walk("gpt-6-luna")).toEqual(["gpt-5.6-luna", "gpt-5.5"]);
+			expect(walk("gpt-6-luna")).toEqual(["gpt-5.6-luna", "gpt-5.6-sol"]);
 		});
 
 		it("never steps sideways into Astra", () => {

@@ -136,9 +136,10 @@ describe("usage ledger redaction and normalization", () => {
 				inputTokens: 1_000_000,
 				outputTokens: 1_000_000,
 			});
-			// Literal pin of the gpt-5.5 price card ($2/M input + $12/M
-			// output), not just delegation: a wrong table entry must fail here.
-			expect(row.costUsd).toBe(14);
+			// Literal pin of the replacement gpt-6-sol long-context card ($4/M
+			// input + $15/M output past 272K), not just delegation: a wrong table
+			// entry must fail here.
+			expect(row.costUsd).toBe(19);
 			expect(row.costUsd).toBe(estimateUsageCostUsd("gpt-5.5", row.tokens));
 			expect(
 				normalizeUsageLedgerRow({ outcome: "success", costUsd: -3 }).costUsd,

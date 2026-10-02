@@ -67,6 +67,11 @@ describe("context budget window coverage", () => {
 	 * rotation proxy copies `body.model` verbatim, so the lookup has to work on
 	 * the raw ids clients actually send. Looking those up straight against the
 	 * table returned null for Codex CLI's own default model.
+	 *
+	 * Every canonical target on this list is unestimated — upstream publishes
+	 * disagreeing Codex and API numbers for all of them — so each resolves to
+	 * `null` rather than a fabricated window. The override tests below prove
+	 * the raw-string lookup path itself still works.
 	 */
 	it("resolves the raw client model strings the runtime actually passes", () => {
 		for (const raw of [
@@ -77,11 +82,13 @@ describe("context budget window coverage", () => {
 			"gpt-5-pro",
 			"GPT-5.5",
 			"openai/gpt-5.5",
+			"gpt-6.1-sol",
+			"openai/gpt-6.1",
 		]) {
 			expect(
 				getEffectiveContextWindow(raw, undefined),
-				`${raw} resolved to no window; the guard silently no-ops for it`,
-			).toEqual({ tokens: 260_000, source: "estimate" });
+				`${raw} resolved to something other than null`,
+			).toBeNull();
 		}
 	});
 
@@ -99,8 +106,8 @@ describe("context budget window coverage", () => {
 	});
 
 	it("still refuses to invent a window for a model it does not know", () => {
-		// resolveNormalizedModel() would fall back to DEFAULT_MODEL here and
-		// hand this a 260k window; the exact/alias-only resolver must not.
+		// resolveNormalizedModel() would fall back to DEFAULT_MODEL here; the
+		// exact/alias-only resolver must not.
 		expect(getEffectiveContextWindow("totally-made-up-model", undefined)).toBeNull();
 	});
 
@@ -122,12 +129,9 @@ describe("context budget window coverage", () => {
 				`override ${value}`,
 			).toBeNull();
 		}
-		// A sub-1 override on an estimated model falls through to the estimate
-		// rather than shadowing it with zero.
-		expect(getEffectiveContextWindow("gpt-5.5", { "gpt-5.5": 0.5 })).toEqual({
-			tokens: 260_000,
-			source: "estimate",
-		});
+		// With no estimate to fall through to, a sub-1 override resolves to
+		// null rather than shadowing a real value with zero.
+		expect(getEffectiveContextWindow("gpt-5.5", { "gpt-5.5": 0.5 })).toBeNull();
 		// 1 and above still resolve as overrides.
 		expect(getEffectiveContextWindow("gpt-5.5", { "gpt-5.5": 1.9 })).toEqual({
 			tokens: 1,
@@ -136,8 +140,10 @@ describe("context budget window coverage", () => {
 	});
 
 	it("applies an override keyed by the canonical id to an alias of it", () => {
+		// `gpt-5` is an alias of `gpt-5.6-sol`, so an override keyed by the
+		// canonical id applies to it.
 		expect(
-			getEffectiveContextWindow("gpt-5", { "gpt-5.5": 88_000 }),
+			getEffectiveContextWindow("gpt-5", { "gpt-5.6-sol": 88_000 }),
 		).toEqual({ tokens: 88_000, source: "override" });
 		// A retired id picks up an override keyed by its replacement.
 		expect(

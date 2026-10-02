@@ -339,7 +339,12 @@ it("recovers a rotated refresh token in a new process when the old one exits bef
  expect(next.getAccountByIndex(0)?.refreshToken).toBe("fixture-rotated");
  await next.saveToDisk();
  expect(JSON.parse(await readFile(path, "utf8")).accounts[0].refreshToken).toBe("fixture-rotated");
- expect(existsSync(path + ".pending-auth.json")).toBe(false);
+ // The journal is retained while the just-rotated .bak can still surface the
+ // spent token: restoring that backup must self-heal back to the rotation.
+ expect(existsSync(path + ".pending-auth.json")).toBe(true);
+ await writeFile(path, await readFile(path + ".bak", "utf8"));
+ expect(JSON.parse(await readFile(path, "utf8")).accounts[0].refreshToken).toBe("fixture-first");
+ expect((await loadAccounts())?.accounts[0]?.refreshToken).toBe("fixture-rotated");
  await manager.flushPendingSave();
  expect((await loadAccounts())?.accounts[0]?.refreshToken).toBe("fixture-rotated");
 });

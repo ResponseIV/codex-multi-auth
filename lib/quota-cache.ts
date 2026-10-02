@@ -5,6 +5,11 @@ import { logWarn } from "./logger.js";
 import { getCodexMultiAuthDir } from "./runtime-paths.js";
 import { tempPathFor } from "./temp-path.js";
 import { withFileTransactionLock } from "./storage/file-lock.js";
+import {
+	assertJsonStoreFileMtimeUnchanged,
+	getJsonStoreFileMtimeMs,
+	withJsonStoreCasRetry,
+} from "./storage/json-store-lock.js";
 import { isRecord } from "./utils.js";
 
 export interface QuotaCacheWindow {
@@ -208,6 +213,19 @@ function mergeQuotaChanges(current: QuotaCacheData, proposed: QuotaCacheData, ba
 				if (!latest || update.updatedAt >= latest.updatedAt) {
 					current[namespace] ??= {};
 					current[namespace][key] = update;
+				} else if (same(latest, before[key])) {
+					// The on-disk entry is still exactly the one this caller's
+					// baseline saw, so nothing concurrent touched this key:
+					// `update` is a deliberate write whose lower stamp can only
+					// come from a backward clock jump on this writer. Re-stamp
+					// it just ahead instead of silently losing it. A raced key
+					// (`!same`) falls through and keeps the on-disk entry: its
+					// higher stamp marks a newer observation, and bumping an
+					// older one past it would let stale quota data overwrite
+					// fresher data.
+					update.updatedAt = latest.updatedAt + 1;
+					current[namespace] ??= {};
+					current[namespace][key] = update;
 				}
 			} else if (same(latest, before[key])) {
 				delete current[namespace]?.[key];
@@ -244,45 +262,63 @@ export async function saveQuotaCache(data: QuotaCacheData, baseline: QuotaCacheD
 
 	const writeTask = async (): Promise<void> => {
 		try {
+			// The transaction lock gives the read-merge-write cross-process mutual
+			// exclusion; the mtime CAS retry inside it is the second-line guard for
+			// writers that do not take the lock: every attempt re-stats, re-reads
+			// the freshest on-disk cache, and re-merges this call's diff onto it
+			// (matching the config save's reload-and-retry ESTALE semantics).
 			await withFileTransactionLock(QUOTA_CACHE_PATH, async () => {
-				const merged = mergeQuotaChanges(await readQuotaCache(), proposed, before);
-				const payload: QuotaCacheFile = { version: 1, ...merged };
-				const cacheDir = getCodexMultiAuthDir();
-				// The quota cache lives alongside other at-rest secrets, so keep the
-				// directory owner-only on POSIX (mode is a no-op on win32 / ACL-based).
-				await fs.mkdir(cacheDir, { recursive: true, mode: 0o700 });
-				// mkdir's mode only applies to a freshly-created dir; an upgrade with a
-				// pre-existing multi-auth dir keeps its old (possibly world-listable)
-				// perms, so re-assert 0o700 on POSIX. Best-effort: a chmod failure must
-				// not break the cache write (the 0o600 file below still protects data).
-				if (process.platform !== "win32") {
-					try {
-						await fs.chmod(cacheDir, 0o700);
-					} catch {
-						// Best-effort hardening only.
-					}
-				}
-				const tempPath = tempPathFor(QUOTA_CACHE_PATH);
-				await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, {
-					encoding: "utf8",
-					mode: 0o600,
-				});
-				let renamed = false;
-				try {
-					await withRetry(() => fs.rename(tempPath, QUOTA_CACHE_PATH), {
-						maxAttempts: 5,
-						backoffMs: (attempt) => 10 * 2 ** (attempt - 1),
-					});
-					renamed = true;
-				} finally {
-					if (!renamed) {
+				await withJsonStoreCasRetry(async () => {
+					const expectedMtimeMs = await getJsonStoreFileMtimeMs(
+						QUOTA_CACHE_PATH,
+					);
+					const merged = mergeQuotaChanges(
+						await readQuotaCache(),
+						proposed,
+						before,
+					);
+					const payload: QuotaCacheFile = { version: 1, ...merged };
+					const cacheDir = getCodexMultiAuthDir();
+					// The quota cache lives alongside other at-rest secrets, so keep the
+					// directory owner-only on POSIX (mode is a no-op on win32 / ACL-based).
+					await fs.mkdir(cacheDir, { recursive: true, mode: 0o700 });
+					// mkdir's mode only applies to a freshly-created dir; an upgrade with a
+					// pre-existing multi-auth dir keeps its old (possibly world-listable)
+					// perms, so re-assert 0o700 on POSIX. Best-effort: a chmod failure must
+					// not break the cache write (the 0o600 file below still protects data).
+					if (process.platform !== "win32") {
 						try {
-							await fs.unlink(tempPath);
+							await fs.chmod(cacheDir, 0o700);
 						} catch {
-							// Best effort temp cleanup.
+							// Best-effort hardening only.
 						}
 					}
-				}
+					const tempPath = tempPathFor(QUOTA_CACHE_PATH);
+					await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, {
+						encoding: "utf8",
+						mode: 0o600,
+					});
+					let renamed = false;
+					try {
+						await assertJsonStoreFileMtimeUnchanged(
+							QUOTA_CACHE_PATH,
+							expectedMtimeMs,
+						);
+						await withRetry(() => fs.rename(tempPath, QUOTA_CACHE_PATH), {
+							maxAttempts: 5,
+							backoffMs: (attempt) => 10 * 2 ** (attempt - 1),
+						});
+						renamed = true;
+					} finally {
+						if (!renamed) {
+							try {
+								await fs.unlink(tempPath);
+							} catch {
+								// Best effort temp cleanup.
+							}
+						}
+					}
+				});
 			});
 		} catch (error) {
 			logWarn(
