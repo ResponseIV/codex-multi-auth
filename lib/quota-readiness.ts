@@ -157,7 +157,12 @@ export function findQuotaCacheEntryForAccount(
 	const key = workspaceId && quotaWorkspaceKey(account, workspaceId);
     const scoped = key ? cache.byWorkspace?.[key] : undefined;
     // Legacy entries describe only the stored binding, never a sibling workspace.
-    if (normalizeQuotaAccountId(workspaceId) !== normalizeQuotaAccountId(account.accountId)) return scoped ?? null;
+    // A workspaces-bearing account whose selection does not resolve (invalid index
+    // or blank id) has no valid binding at all — never fall back to legacy keys.
+    if (
+        normalizeQuotaAccountId(workspaceId) !== normalizeQuotaAccountId(account.accountId) ||
+        (account.workspaces?.length && !normalizeQuotaAccountId(workspaceId))
+    ) return scoped ?? null;
     const accountId = normalizeQuotaAccountId(account.accountId);
     const newer = (legacy: QuotaCacheEntry | undefined) => scoped && (!legacy || scoped.updatedAt >= legacy.updatedAt) ? scoped : legacy ?? null;
 	if (accountId && hasUniqueQuotaAccountId(accounts, account) && cache.byAccountId[accountId]) {

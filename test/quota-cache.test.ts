@@ -151,6 +151,31 @@ describe("quota cache", () => {
     expect(findQuotaCacheEntryForAccount(loaded, account, [account], undefined, "org")).toBeNull();
   });
 
+  it("never falls back to a stored binding when a workspace selection does not resolve", async () => {
+    const { loadQuotaCache, saveQuotaCache } = await import("../lib/quota-cache.js");
+    const { findQuotaCacheEntryForAccount } = await import("../lib/quota-readiness.js");
+    // Token identity exists only in the access token, and the saved workspace
+    // index no longer resolves — the email-keyed binding is not the selection.
+    const tokenOnly = {
+      recordId: "fixture-record-1",
+      email: "tokenonly@example.com",
+      workspaces: [{ id: "ws-a", enabled: true }, { id: "ws-b", enabled: true }],
+      currentWorkspaceIndex: 7,
+    };
+    const bindingOnly = { recordId: "fixture-record-2", email: "binding@example.com" };
+    await saveQuotaCache({
+      byAccountId: {},
+      byEmail: {
+        "tokenonly@example.com": { updatedAt: 1000, status: 200, model: "fixture", planType: "pro", primary: { usedPercent: 55 }, secondary: {} },
+        "binding@example.com": { updatedAt: 1000, status: 200, model: "fixture", planType: "pro", primary: { usedPercent: 66 }, secondary: {} },
+      },
+    });
+    const loaded = await loadQuotaCache();
+    expect(findQuotaCacheEntryForAccount(loaded, tokenOnly, [tokenOnly, bindingOnly])).toBeNull();
+    // A workspace-less token-only account still resolves its own binding entry.
+    expect(findQuotaCacheEntryForAccount(loaded, bindingOnly, [tokenOnly, bindingOnly])?.primary.usedPercent).toBe(66);
+  });
+
   it("stages atomic writes through tempPathFor and leaves no .tmp behind", async () => {
     // End-to-end check of the staging contract this PR centralizes: the save
     // must write a sibling named by tempPathFor (<target>.<pid>.<ms>.<hex8>.tmp,
